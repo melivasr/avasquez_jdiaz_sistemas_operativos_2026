@@ -4,6 +4,34 @@ org 0x7C00 ;Directiva NASM. Indica direccion de origen del codigo.
 bits 16 ;Directiva NASM. Indica modo de ensamblado.
 ;Se inicia en 16 bits para retro-compatibilidad
 
+; HEADER del disco para cumplir con la info de formato FAT 12
+; BASADO EN LA DOCUMENTACION DE LOS DISCOS
+jmp short main ; salto proximo para saltar el header.
+nop ; para evitar riesgo ???
+
+bdb_oem:                    db  'MSWIN4.1' ; estandar
+bdb_bytes_per_sector:       dw  512 ;512 bytes por sector
+bdb_sectors_per_cluster:    db  1; 1 sector por cluster
+bdb_reserved_sectors:       dw  1; 1 sector reservado
+bdb_fat_count:              db  2; cuantos fat hay en el disco
+bdb_dir_entries_count:      dw  0E0h; numero estandar de entradas de directorio en el disco
+bdb_total_sectors:          dw  2880; 2880 sectores de 512 bytes. Mismo que el makefile
+bdb_media_descriptor_type:  db 0f0h; estandar
+bdb_sectors_per_fat:        dw  9; estandar
+bdb_sectors_per_track:      dw  18; estandar
+bdb_heads:                  dw 2; estandar
+
+bdb_hidden_sectors:         dd 0; estandar
+bdb_large_sector_count:     dd 0; estandar
+
+ebr_drive_number:           db 0; estandar
+                            db 0; cero quemado, estandar
+ebr_signature:              db 29h; estandar
+ebr_volume_id:              db 12h, 34h, 56h, 78h ; estandar
+ebr_volume_label:           db 'JAFI OS    ' ;debe de ser de size=11 bytes, o sea, exactamente 11 chars
+;JAFI OS     = 6 letras/chars + 1 espacio en medio + 4 espacios despues
+ebr_system_id:              db 'FAT12   ';debe ser de size=8bytes, 5letras +3 espacios
+
 ; set up consistente del programa
 main:
     mov ax, 0 ;cargar 0 en registro general de 16 bits
@@ -57,7 +85,7 @@ rellenado:
 
 ; poner 55AA al final del MBR
 firma:
-    dw 0xAA55 ; Directiva NASM. Define word (32 bits)
+    dw 0xAA55 ; Directiva NASM. Define word (2 bytes)
     ; por ser little endian, se acomoda:
     ; 510: 0x55
     ; 511: 0xAA
