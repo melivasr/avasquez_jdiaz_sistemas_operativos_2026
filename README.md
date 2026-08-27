@@ -68,4 +68,8 @@ Para eso, hay que:
 2. Interactuar con el `file system` para cargarle data del disco.
 
 Inicialmente, se usara el formato FAT 12. Es el mas sencillo, por aprendizaje se inicia con ese.
-FAT 12 funciona de forma que espera un "header" con informacion dle formato en el disco. Sin esa info, no funcionara.
+FAT 12 funciona de forma que espera un "header" con informacion dle formato en el disco. Sin esa info, no funcionara. Ese header debe programarse en el `boot.asm`. En resumen, este header tiene dos secciones principales de "parametros" a definir:
+- `EBR (Extended Boot Record/Registro de Arranque Extendida)`: Estructura de datos que forma parte del sector de arranque o que sirve para enlazar particiones logicas dentro de una particion extendida
+- `BDB/BPB (BIOS Parameter Block/Bloque de Parametros del BIOS)`: Es la tabla de datos fundamental situada al principio del sector de arranque (VBR) que define la geometria y la estructura interna del sistema de archivos. Indica al SO como leer el disco.
+
+Ahora bien, el disco puede ser leido a traves de la `INT 13` de ASM, pero esta recibe formato CHS (Cylinder, Head, Sector). El formato LBA () es bastante mas intuitivo, por lo que podemos hacer la transformacion.

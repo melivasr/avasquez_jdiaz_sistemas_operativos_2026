@@ -4,8 +4,10 @@ org 0x7C00 ;Directiva NASM. Indica direccion de origen del codigo.
 bits 16 ;Directiva NASM. Indica modo de ensamblado.
 ;Se inicia en 16 bits para retro-compatibilidad
 
+; ==================================================================
 ; HEADER del disco para cumplir con la info de formato FAT 12
 ; BASADO EN LA DOCUMENTACION DE LOS DISCOS
+; ==================================================================
 jmp short main ; salto proximo para saltar el header.
 nop ; para evitar riesgo ???
 
@@ -32,14 +34,29 @@ ebr_volume_label:           db 'JAFI OS    ' ;debe de ser de size=11 bytes, o se
 ;JAFI OS     = 6 letras/chars + 1 espacio en medio + 4 espacios despues
 ebr_system_id:              db 'FAT12   ';debe ser de size=8bytes, 5letras +3 espacios
 
-; set up consistente del programa
+; ==================================================================
+; BOOTLOADER PROGRAM
+; ==================================================================
+
 main:
+
+; set up consistente del programa
+basic_setup:
     mov ax, 0 ;cargar 0 en registro general de 16 bits
     mov ds, ax ;cargar 0 en el data segment
     mov es, ax ;0 en el extra segment
     mov ss, ax ;0 en el stack segment
 
     mov sp, 0x7C00 ;iniciar el stack despues de nuestra aplicacion
+
+    mov [ebr_drive_number], dl ; en dl debe ir el drive number segun la docu
+    mov ax, 1 ; LBA index a leer. Debe pasarse a CHS
+    mov cl, 1 ; por docu
+    mov bx, 0x7E00 ; puntero a buffer que existe en el disco
+    call disc_read
+
+
+    ; Set Up para leer del disco
     mov si, os_boot_msg ; guardar en source index el msg
     call print
     hlt; congela cpu hasta que ocurra una interrupcion , por si hay no esperadas.
@@ -48,6 +65,27 @@ main:
 halt_loop:
     hlt ;
     jmp halt_loop
+
+; input: LBA index in ax
+; cx [0:5]: sector number 
+; cx [15:6]: cylinder
+; dh: head
+lba_to_chs:
+    push ax
+    push dx 
+
+    xor dx, dx 
+    
+
+; funcion para leer el disco con INT 13 convirtiendo LBA en CHS
+disk_read:
+    push ax
+    push bx
+    push cx
+    push dx
+    push di
+
+    call lba_to_chs
 
 ; loop para prints
 print:
