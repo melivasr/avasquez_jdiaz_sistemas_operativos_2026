@@ -54,7 +54,7 @@ main_read:
     mov ax, 1 ; LBA index a leer. Debe pasarse a CHS
     mov cl, 1 ; por docu
     mov bx, 0x7E00 ; puntero a buffer que existe en el disco
-    call disc_read
+    call disk_read
 
     ; Set Up para leer del disco
     mov si, os_boot_msg ; guardar en source index el msg
@@ -94,7 +94,7 @@ rootDirAfter:
     mov di, buffer ; queda cargado el root directory en memoria y en di su direccion !
 
 ; Ahora hay que buscar el Kernel
-search_kernel:
+searchKernel:
     mov si, file_kernel_bin ; mover el nombre del kernel file a SourceIndex
     mov cx, 11 ; poner el tamaño (bytes) del nombre a cx
 
@@ -119,7 +119,7 @@ kernelNotFound:
     call print
 
     hlt; congela cpu hasta que ocurra una interrupcion , por si hay no esperadas.
-    jmp halt
+    jmp halt_loop
 
 foundKernel:
     mov ax, [di+26]; encontrar el cluster asociado al kernel
@@ -170,12 +170,12 @@ loadKernelLoop:
 
 odd:
     shr ax, 4 ; quita 4 bits de abajo y mete 4 ceros arriba
-    jmp nextCluster
+    jmp nextClusterAfter
 
 even:
     and ax, 0x0FFF ; devuelve los otros 12 bits
 
-nextClusterAfetr:
+nextClusterAfter:
     cmp ax, 0x0FF8 ; chequear si llegamos a final de la tabla FAT ?
     jae readKernelFinish
 
@@ -190,7 +190,7 @@ readKernelFinish:
     mov ds, ax
     mov es, ax
 
-    jmp kerne_load_segment:kernel_load_offset ; es un jump largo, a otro file
+    jmp kernel_load_segment:kernel_load_offset ; es un jump largo, a otro file
 
     hlt ; detener ejecucion por si el salto falló
 
@@ -313,7 +313,7 @@ disk_reset:
     popa ; pop all
     ret ; volver a retry a intentar otra vez
 
-done_read;
+done_read:
     ;restaurar stack
     pop di
     pop dx
@@ -322,8 +322,6 @@ done_read;
     pop ax
 
     ret ; se logró leer, entonces se retorna al flujo de main
-
-
 
 ; loop para prints
 print:
@@ -347,6 +345,8 @@ done_print:
     pop bx
     pop ax
     pop si
+
+    ret
 
 ;============================
 ; VARIABLES

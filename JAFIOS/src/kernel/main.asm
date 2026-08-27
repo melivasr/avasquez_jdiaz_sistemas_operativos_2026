@@ -44,6 +44,8 @@ done_print:
     pop ax
     pop si
 
+    ret
+
 os_boot_msg: db 'JafiOS has booted', 0x0D, 0x0A, 0; 0 es para indicar el fin del string, hexas son new line characters 
     
 ; llenar los 510 bytes
