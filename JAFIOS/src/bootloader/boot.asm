@@ -274,14 +274,17 @@ lba_to_chs:
 
 ; funcion para leer el disco con INT 13 convirtiendo LBA en CHS
 disk_read:
+    ; push del caller
     push ax
     push bx
     push cx
     push dx
     push di
 
+    push cx ;; guardar el numero de sectores a leer (cl) ANTES de que lba_to_chs pise cx 
     call lba_to_chs
 
+    pop ax;  recuperar el contador -> al = numero de sectores (ah queda en 0, no importa)
     mov ah, 02h
     mov di, 3 ; counter para repetir al menos 3 veces por si hay algun error no fatal en el disco.
 
