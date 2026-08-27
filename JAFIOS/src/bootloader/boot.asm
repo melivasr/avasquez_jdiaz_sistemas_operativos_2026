@@ -59,7 +59,140 @@ main_read:
     ; Set Up para leer del disco
     mov si, os_boot_msg ; guardar en source index el msg
     call print
+
+    ; 4 segmentos
+    ; reserved segment = 1 sector
+    ; FAT segment = 9*2 = 18 sectors
+    ; Root Directory Segment = 1 sector (in the 19th sector)
+    ; Data segment 
+
+    mov ax, [bdb_sectors_per_fat]
+    mov bl, [bdb_fat_count]
+    xor bh, bh ; limpiar bh
+    mul bx ; MUL multiplica siempre con ax, Devuelve FAT segment
+    add ax, [bdb_reserved_sectors] ; estamos sumando 9*2 (que esta en ax) + 1, lo cual devuelve 19, el LBA del root directory
+
+    push ax
+
+    mov ax, [bdb_dir_entries_count]
+    shl ax, 5 ; ax * 32 (pues 2^5 = 32)
+    xor dx, dx ; limpiar residuo
+    div word [bdb_bytes_per_sector] ; (32* num_of_entries)/bytes_per_sectors = total number of sectors a leer
+    
+    test dx, dx ; verificar si hubo residuo
+    jz rootDirAfter ; si no hay, se salta
+    inc ax ; si hubo residuo, sumamos 1 para hacer redondeo
+
+rootDirAfter:
+    mov cl, al ; mover a cl el al que contiene el total number of sectors a leer
+    pop ax ; devolver el LBA del root directory que habiamos hecho push
+    mov dl, [ebr_drive_number] ; para saber de cual Drive leer.
+    mov bx, buffer ; mover el buffr a bx
+    call disk_read ; leer el disco
+
+    xor bx, bx ; limpia bx, bx = 0
+    mov di, buffer ; queda cargado el root directory en memoria y en di su direccion !
+
+; Ahora hay que buscar el Kernel
+search_kernel:
+    mov si, file_kernel_bin ; mover el nombre del kernel file a SourceIndex
+    mov cx, 11 ; poner el tamaño (bytes) del nombre a cx
+
+    push di ; preservar DI
+
+    REPE CMPSB ; REPE repite instrucciones. CMPSB compara bytes CX veces ( o sea, compara 11 bytes) entre el SI y el DI. 
+    ; Note que en SI esta el nombre del Kernel y en DI esta el buffer al root directory en mem
+
+    pop di ; recuperar di porque ya terminamos de operar
+
+    je foundKernel ; si cmpsb encuentra que el nombre es igual al buffer, devuelve un equal
+
+    ; Que pasa si no lo encontró? Tenemos que seguir buscando
+    add di, 32 ; aumentar el buffer en 32 
+    inc bx ; bx es nuestro contador de entradas
+    cmp bx, bdb_dir_entries_count ; ya leimos todas las entradas de directorio?
+    jl searchKernel ; si es menor, entonces no hemos leido todas y buscamos otra vez en el kernel con el buffer offseteado
+    jmp kernelNotFound ; si no es menor, entonces si leimos todas y NO se encontro el kernel
+
+kernelNotFound:
+    mov si, msg_kernel_not_found
+    call print
+
     hlt; congela cpu hasta que ocurra una interrupcion , por si hay no esperadas.
+    jmp halt
+
+foundKernel:
+    mov ax, [di+26]; encontrar el cluster asociado al kernel
+    ; di es la direccion del kernel. 26 es un offset al First Logical Cluster Field
+    mov [kernel_cluster], ax ; mover el cluster encontrado a la variable
+
+    ; preparar Disk Read
+    mov ax, [bdb_reserved_sectors]
+    mov bx, buffer
+    mov cl, [bdb_sectors_per_fat]
+    mov dl, [ebr_drive_number]
+    
+    call disk_read
+
+    ; setear la memoria a la que le vamos a cargar la data del kernel
+    mov bx, kernel_load_segment ; la cargamos en 0x2000
+    mov es, bx ; en INT 13h, el buffer es es calling bx
+    mov bx, kernel_load_offset ; con un offset de cero
+
+loadKernelLoop:
+    mov ax, [kernel_cluster] ; current cluster that we are reading
+    add ax, 31 ; setea el offset para poder leer el cluster que queremos. Cambia segun disco, deberia ser dinamico pero por ahora quemado sirve
+    mov cl, 1 ; numero de sectores a leer
+    mov dl, [ebr_drive_number]
+
+    ; leemos un sector del kernel cluster a la vez
+    call disk_read
+
+    add bx, [bdb_bytes_per_sector]
+
+    ; debemos encontrar la posicion del siguiente cluster a leer, con la formula (kernel_cluster*3)/2
+    mov ax, [kernel_cluster] ; poner el kernel cluster actual otra vez en ax por si disk_read lo sobreescribió
+    mov cx, 3
+    mul cx ; multiplicar ax*cx = kernel_cluster * 3
+    mov cx, 2
+    div cx ; dividir ax/cx = (kernel_cluster*3)/2
+
+    mov si, buffer
+    add si, ax
+    mov ax, [ds:si]
+    
+    ; FAT 12 es 12 bytes por cluster. para obtener el cluster real hay que manipular un poco.
+    ; Si la div fue par (sin residuo), se toma los 12 bits mas bajos
+    ; Si la div fue impar (con residuo), se toma los 12 bits mas altos
+
+    or dx, dx
+    jz even ; si es zero, entonces dx no devolvió residuo (dx = 0 para even, =1 para odd)
+
+odd:
+    shr ax, 4 ; quita 4 bits de abajo y mete 4 ceros arriba
+    jmp nextCluster
+
+even:
+    and ax, 0x0FFF ; devuelve los otros 12 bits
+
+nextClusterAfetr:
+    cmp ax, 0x0FF8 ; chequear si llegamos a final de la tabla FAT ?
+    jae readKernelFinish
+
+    ; si no hemos llegado al final
+    mov [kernel_cluster], ax ; poner el nuevo cluster (ax) en la variable 
+    jmp loadKernelLoop
+
+readKernelFinish:
+    ; queremos saltar al kernel, seteamos valores
+    mov dl, [ebr_drive_number]
+    mov ax, kernel_load_segment
+    mov ds, ax
+    mov es, ax
+
+    jmp kerne_load_segment:kernel_load_offset ; es un jump largo, a otro file
+
+    hlt ; detener ejecucion por si el salto falló
 
 ; ==============================
 ; FUNCIONES AUXILIARES
@@ -97,8 +230,8 @@ lba_to_chs:
 
     ; Poner dx en cero (igual a mov dx, 0, pero mas eficiente)
     xor dx, dx ; limpiar registro donde queda el residuo
-    ; realiza t = LDA/bdb_sector_per_track, pues LDA = ax.
-    div word [bdb_sector_per_track] ; deja residuo en dx y el cociente en ax
+    ; realiza t = LDA/bdb_sectors_per_track, pues LDA = ax.
+    div word [bdb_sectors_per_track] ; deja residuo en dx y el cociente en ax
     ; LBA % bdb_bytes_per_sector = residuo de la división
     inc dx ; (LBA % bdb_bytes_per_sector) + 1 = sector = dx
     mov cx, dx ; guardar sector = s = dx en cx
@@ -106,9 +239,9 @@ lba_to_chs:
     ; ===================================
     ; CALCULAR h y c
     ; ===================================
-    ; HEAD = t % number_of_heads = LDA/bdb_sector_per_track % number_of_heads
-    ; CYLINDER = t / number_of_headers = LDA/bdb_sector_per_track / number_of_heads
-    ; Recordando que reg ax AUN contiene LDA/bdb_sector_per_track... dividir entre number _of_heads
+    ; HEAD = t % number_of_heads = LDA/bdb_sectors_per_track % number_of_heads
+    ; CYLINDER = t / number_of_headers = LDA/bdb_sectors_per_track / number_of_heads
+    ; Recordando que reg ax AUN contiene LDA/bdb_sectors_per_track... dividir entre number _of_heads
 
     xor dx, dx ; limpiar el registro de residuo
     div word [bdb_heads] ; esto deja el residuo h en dx y el cociente c en ax
@@ -218,8 +351,15 @@ done_print:
 ;============================
 ; VARIABLES
 ;============================
-os_boot_msg: db 'JafiOS has booted', 0x0D, 0x0A, 0; 0 es para indicar el fin del string, hexas son new line characters 
+os_boot_msg: db 'Loading...', 0x0D, 0x0A, 0; 0 es para indicar el fin del string, hexas son new line characters 
 fail_read_disk_msg: db 'Failed to read disk', 0x0D, 0x0A, 0;
+file_kernel_bin db 'KERNEL  BIN' ; cumplir con los 11 bytes
+msg_kernel_not_found db 'KERNEL.BIN not found'
+kernel_cluster dw 0 ; cual cluster está? es definido por foundKernel
+
+kernel_load_segment equ 0x2000 ; reservar esta area de memoria para el kernel
+kernel_load_offset equ 0
+
 
 ;============================
 ; Fin del programa
@@ -241,3 +381,5 @@ firma:
     ; 511: 0xAA
     ; Asi, como el sector permitido por legacy (MBR) es de 512 bytes
     ; en los ultimos 2 bytes (510,511) va a encontrar el identificador 55AA
+
+buffer: ; buffer BX para leer del disco y ponerlo ahi

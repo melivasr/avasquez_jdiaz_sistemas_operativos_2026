@@ -105,3 +105,15 @@ c = \frac{t}{numberOfHeads} = \frac{\frac{LBA}{sectorsPerTrack}}{numberOfHeads}
 Donde `t` es track, `s` es sector, `h` es head, `c` es cilindro. Note que se ocupa realizar módulo. Módulo no existe como tal en x86 sino que al realizar `div`, el cociente queda en `ax`, el residuo queda en `dx`. Módulo es el residuo de la división.
 
 Asi, el proceso seria: generar `t` usando `div word [bdb_sector_per_track]`. Esto deja ax=t. Luego, si hacemos `dx + 1` obtenemos `s` que es el módulo + 1. Luego, usamos `ax` (que contiene `LBA/sectors_per_track`) y lo dividimos entre `number of heads`. Así, `h` (el residuo) queda en `dx` y `c` (el cociente) queda en `ax`. Despues hay que hacer acomodos para que queden en los registros que se requieren, lo cual se explica en la documentación interna de `boot.asm`
+
+Ahora bien, en fat 12 el disco se diide en 4 segmentos
+
+Reserved segment -> tiene un set size que esta definido por el header (`bdb_reserved_sectors`)
+file allocation tables (fat) segments -> size esta dado por `bdb_sectors_per_fat` multiplicado por `bdb_fat_count`
+Root directory segment -> top level directory del sistema. De ahi se puede llegar atodo (trees). Esta dado por la continuacion de los reserved y FAT. Es de 1 sector, entonces, por ejemplo; si reserved es 1 y FAT es 18, root esta en el 19.
+Finalmente, el Data Segment = es los datos en los archivos
+
+Se suele ir al root directory y de ahi se localiza el archivo a buscar (el kernel por ejemplo).
+Luego, vamos al data segment y recuperamos los datos asociados con el archivo, dado que el root nos dara la ubicacion de los datos en ese directorio particular.
+
+Por lo tanto, el primer paso es obtener el LBA del root directory.
