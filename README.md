@@ -72,4 +72,36 @@ FAT 12 funciona de forma que espera un "header" con informacion dle formato en e
 - `EBR (Extended Boot Record/Registro de Arranque Extendida)`: Estructura de datos que forma parte del sector de arranque o que sirve para enlazar particiones logicas dentro de una particion extendida
 - `BDB/BPB (BIOS Parameter Block/Bloque de Parametros del BIOS)`: Es la tabla de datos fundamental situada al principio del sector de arranque (VBR) que define la geometria y la estructura interna del sistema de archivos. Indica al SO como leer el disco.
 
-Ahora bien, el disco puede ser leido a traves de la `INT 13` de ASM, pero esta recibe formato CHS (Cylinder, Head, Sector). El formato LBA () es bastante mas intuitivo, por lo que podemos hacer la transformacion.
+Ahora bien, el disco puede ser leido a traves de la `INT 13` de ASM, pero esta recibe formato `CHS (Cylinder, Head, Sector)`. El formato LBA (Logical Block Addressing) es bastante mas intuitivo, por lo que podemos hacer la transformacion CHS -> LBA.
+
+CHS -> LBA puede hacerse con la fórmula:
+```math
+LBA = (C*TH*TS)+(H*TS)+(S-1)
+```
+dónde:
+- C = Sector Cylinder Number
+- TH = Total Headers on disk
+- TS = Total Sections on disk
+- H = Sector Head Number
+- S = Sector's number
+
+A su vez, estos valores se calculan de la siguiente forma:
+```math
+t = \frac{LBA}{sectorsPerTrack}
+```
+
+```math
+s = (LBA\%sectorsPerTrack) + 1
+```
+
+```math
+h = t \% numberOfHeads = \frac{LBA}{sectorsPerTrack} \% numberOfHeads
+```
+
+```math
+c = \frac{t}{numberOfHeads} = \frac{\frac{LBA}{sectorsPerTrack}}{numberOfHeads}
+```
+
+Donde `t` es track, `s` es sector, `h` es head, `c` es cilindro. Note que se ocupa realizar módulo. Módulo no existe como tal en x86 sino que al realizar `div`, el cociente queda en `ax`, el residuo queda en `dx`. Módulo es el residuo de la división.
+
+Asi, el proceso seria: generar `t` usando `div word [bdb_sector_per_track]`. Esto deja ax=t. Luego, si hacemos `dx + 1` obtenemos `s` que es el módulo + 1. Luego, usamos `ax` (que contiene `LBA/sectors_per_track`) y lo dividimos entre `number of heads`. Así, `h` (el residuo) queda en `dx` y `c` (el cociente) queda en `ax`. Despues hay que hacer acomodos para que queden en los registros que se requieren, lo cual se explica en la documentación interna de `boot.asm`
