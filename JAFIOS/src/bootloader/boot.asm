@@ -354,7 +354,7 @@ done_print:
 os_boot_msg: db 'Loading...', 0x0D, 0x0A, 0; 0 es para indicar el fin del string, hexas son new line characters 
 fail_read_disk_msg: db 'Failed to read disk', 0x0D, 0x0A, 0;
 file_kernel_bin db 'KERNEL  BIN' ; cumplir con los 11 bytes
-msg_kernel_not_found db 'KERNEL.BIN not found'
+msg_kernel_not_found db 'KERNEL.BIN not found', 0
 kernel_cluster dw 0 ; cual cluster está? es definido por foundKernel
 
 kernel_load_segment equ 0x2000 ; reservar esta area de memoria para el kernel

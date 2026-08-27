@@ -1,17 +1,11 @@
-;ASM x86 for a basic bootloader
+;ASM x86 for a basic kernel
 
-org 0x7C00 ;Directiva NASM. Indica direccion de origen del codigo.
+org 0x0 ;Directiva NASM. Indica direccion de origen del codigo.
 bits 16 ;Directiva NASM. Indica modo de ensamblado.
 ;Se inicia en 16 bits para retro-compatibilidad
 
 ; set up consistente del programa
-main:
-    mov ax, 0 ;cargar 0 en registro general de 16 bits
-    mov ds, ax ;cargar 0 en el data segment
-    mov es, ax ;0 en el extra segment
-    mov ss, ax ;0 en el stack segment
-
-    mov sp, 0x7C00 ;iniciar el stack despues de nuestra aplicacion
+start:
     mov si, os_boot_msg ; guardar en source index el msg
     call print
     hlt; congela cpu hasta que ocurra una interrupcion , por si hay no esperadas.
@@ -47,21 +41,3 @@ done_print:
     ret
 
 os_boot_msg: db 'JafiOS has booted', 0x0D, 0x0A, 0; 0 es para indicar el fin del string, hexas son new line characters 
-    
-; llenar los 510 bytes
-rellenado:
-    times 510-($-$$) db 0 ; Directivas NASM. times -> Repite datos, db -> define byte
-    ; $ = pos actual dentro del codigo
-    ; $$ = inicio de seccion actual (linea 0 del codigo)
-    ; $-$$ = bytes dentro del codigo
-    ; Entonces, se escribe el byte 0 un total de 510-bytes en el codigo
-    ; Asi, se consigue rellenar de ceros y llegar a los ultimos 2 bytes 
-
-; poner 55AA al final del MBR
-firma:
-    dw 0xAA55 ; Directiva NASM. Define word (2 bytes)
-    ; por ser little endian, se acomoda:
-    ; 510: 0x55
-    ; 511: 0xAA
-    ; Asi, como el sector permitido por legacy (MBR) es de 512 bytes
-    ; en los ultimos 2 bytes (510,511) va a encontrar el identificador 55AA
