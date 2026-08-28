@@ -24,6 +24,9 @@ make
 
 # emular con qemu
 qemu-system-i386 -fda build/main.img
+
+# emular con qemu en RTC local
+qemu-system-i386 -fda main.bin -rtc base=localtime
 ```
 
 Para agregar discos
