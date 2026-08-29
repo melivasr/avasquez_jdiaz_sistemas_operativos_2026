@@ -29,13 +29,13 @@ menu:
     mov ah, 00h
     int 16h ; devuelve en AL ascii, en AH scan
 
-    cmp al, 'R' ; modo reloj
+    cmp al, 'r' ; modo reloj
     je modoReloj
 
-    cmp al, 'A' ; modo alarma
+    cmp al, 'a' ; modo alarma
     je modoAlarma
     
-    hlt; congela cpu hasta que ocurra una interrupcion , por si hay no esperadas.
+    jmp menu ; se mantiene en bucle hasta que el usuario presione tecla
 
 ; bucle si ocurren interrupciones
 halt_loop:
@@ -101,7 +101,7 @@ configurar_alarma:
 	mov dh, 20h
 		
 	int 1Ah ; BIOS configura la alarma y sigue con la siguiente instr.
-	jc alarma_error ; MANEJAR ERRORES
+	jc alarm_error ; MANEJAR ERRORES
 
     ret
 
@@ -262,7 +262,7 @@ printChar:
 ; ==================================
 
 os_boot_msg: db 'JafiOS has booted !', 0x0D, 0x0A, 0; 0 es para indicar el fin del string, hexas son new line characters 
-menu_msg: db 'Presiona R para el modo Reloj, A para el modo Alarma!', 0x0D, 0x0A, 0
+menu_msg: db 'Presiona R para el Modo Reloj, A para el Modo Alarma!', 0x0D, 0x0A, 0
 
 ; imprimir tiempo
 time_msg: db 'Actual Time: ', 0x0D, 0x0A, 0; 
@@ -276,4 +276,3 @@ alarm_error_msg: db 'Error: Ya existe una alarma | Fallo en RTC', 0x0D, 0x0A, 0
 alarm_triggered: db 0 
 old_4a_offset  dw 0
 old_4a_segment dw 0
-alarm_triggered db 0
