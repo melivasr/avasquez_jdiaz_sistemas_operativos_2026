@@ -21,7 +21,20 @@ bits 16 ;Directiva NASM. Indica modo de ensamblado.
 start:
     mov si, os_boot_msg ; guardar en source index el msg
     call print
-    call modoReloj 
+    mov si, menu_msg
+    call print
+
+menu:
+    ; INT 16h , 00h para esperar por tecla
+    mov ah, 00h
+    int 16h ; devuelve en AL ascii, en AH scan
+
+    cmp al, 'R' ; modo reloj
+    je modoReloj
+
+    cmp al, 'A' ; modo alarma
+    je modoAlarma
+    
     hlt; congela cpu hasta que ocurra una interrupcion , por si hay no esperadas.
 
 ; bucle si ocurren interrupciones
@@ -71,7 +84,7 @@ done_print:
 modoAlarma:
     call configurar_alarma
     ; imprimir
-    ret
+    jmp menu
 
 ;
 ; ==================================
@@ -182,8 +195,10 @@ modoReloj:
     mov si, new_line
     call print
 
-    ; esperar a que cambie el segundo
-
+; 
+; ==================================
+; Esperar que el segundo cambie
+; ==================================
 esperar:
     mov ah, 02h ; leer RTC
     INT 1Ah ; devuelve CH, CL, DH, DL en BCD
@@ -246,7 +261,8 @@ printChar:
 ; VARIABLES
 ; ==================================
 
-os_boot_msg: db 'JafiOS has booted', 0x0D, 0x0A, 0; 0 es para indicar el fin del string, hexas son new line characters 
+os_boot_msg: db 'JafiOS has booted !', 0x0D, 0x0A, 0; 0 es para indicar el fin del string, hexas son new line characters 
+menu_msg: db 'Presiona R para el modo Reloj, A para el modo Alarma!', 0x0D, 0x0A, 0
 
 ; imprimir tiempo
 time_msg: db 'Actual Time: ', 0x0D, 0x0A, 0; 
