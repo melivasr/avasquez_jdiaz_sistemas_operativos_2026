@@ -21,10 +21,14 @@ bits 16 ;Directiva NASM. Indica modo de ensamblado.
 start:
     mov si, os_boot_msg ; guardar en source index el msg
     call print
-    mov si, menu_msg
-    call print
 
 menu:
+    mov si, menu_msg
+    call print
+    mov si, menu_options_msg
+    call print
+
+menu_loop:
     ; INT 16h , 00h para esperar por tecla
     mov ah, 00h
     int 16h ; devuelve en AL ascii, en AH scan
@@ -35,7 +39,7 @@ menu:
     cmp al, 'a' ; modo alarma
     je modoAlarma
     
-    jmp menu ; se mantiene en bucle hasta que el usuario presione tecla
+    jmp menu_loop ; se mantiene en bucle hasta que el usuario presione tecla
 
 ; bucle si ocurren interrupciones
 halt_loop:
@@ -258,11 +262,37 @@ printChar:
 
 ; 
 ; ==================================
+; CLEAR
+; Usa INT10h - 06h : Scroll Up
+; ==================================
+
+clear:
+    ; preservar reg
+    push ax
+    push bh
+    push bx
+    push dx
+
+    mov ah, 06h
+	mov al, 00h ; desplazar toda la ventana y limpiarla
+	mov bh, 07h
+	mov cx, 0000h ; fila superior y columna izquierda = 00
+	mov dx, 184Fh ; fila inferior = 18h = 24. Columna derecha = 4Fh = 79
+	int 10h
+
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+
+;
+; ==================================
 ; VARIABLES
 ; ==================================
 
 os_boot_msg: db 'JafiOS has booted !', 0x0D, 0x0A, 0; 0 es para indicar el fin del string, hexas son new line characters 
-menu_msg: db 'Presiona R para el Modo Reloj, A para el Modo Alarma!', 0x0D, 0x0A, 0
+menu_msg: db 'Welcome to JafiOS Menu!', 0x0D, 0x0A, 0
+menu_options_msg: db 'R = Modo Reloj, A = Modo Alarma, V = Volver al menú', 0x0D, 0x0A, 0
 
 ; imprimir tiempo
 time_msg: db 'Actual Time: ', 0x0D, 0x0A, 0; 
