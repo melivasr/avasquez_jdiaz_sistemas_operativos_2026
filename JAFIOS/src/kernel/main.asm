@@ -83,6 +83,7 @@ done_print:
 ;
 ; ==================================
 ; Modo Alarma
+; SIN TERMINAR !!!!!
 ; ==================================
 
 modoAlarma:
@@ -165,6 +166,10 @@ alarm_error:
     ret
 
 ;
+
+; ================================== ==================================
+
+
 ; ==================================
 ; Modo Reloj
 ; ==================================
@@ -202,8 +207,17 @@ modoReloj:
 ; 
 ; ==================================
 ; Esperar que el segundo cambie
+; O espera que el usuario vuelva al menu (va a clear -> menu)
 ; ==================================
+
 esperar:
+    ; DETECTAR SI VOLVER AL MENU 
+    mov ah, 00h ; INT 16h , 00h para esperar por tecla
+    int 16h ; devuelve en AL ascii, en AH scan
+
+    cmp al, 'v' ; volver al menu
+    je clear
+
     mov ah, 02h ; leer RTC
     INT 1Ah ; devuelve CH, CL, DH, DL en BCD
 
@@ -284,6 +298,8 @@ clear:
     pop cx
     pop bx
     pop ax
+
+    jmp menu ; volver al menu
 
 ;
 ; ==================================
