@@ -1,5 +1,18 @@
 ;ASM x86 for a basic kernel
 
+; ============================================================================
+; DATOS PREVIOS
+; Se salta desde el boot.asm con jmp 2000h:0000h (ver variables al final)
+; Direccion física = CS × 16 + IP = 0x8000 = 8000h
+; Despues del salto:
+; CS = 2000h = kernel load segment
+; DS = 2000h
+; ES = 2000h
+; IP = 0000h
+; dl, [ebr_drive_number] = numero de unidad de BIOS
+
+;============================================================================
+
 org 0x0 ;Directiva NASM. Indica direccion de origen del codigo.
 bits 16 ;Directiva NASM. Indica modo de ensamblado.
 ;Se inicia en 16 bits para retro-compatibilidad
@@ -8,7 +21,7 @@ bits 16 ;Directiva NASM. Indica modo de ensamblado.
 start:
     mov si, os_boot_msg ; guardar en source index el msg
     call print
-    call modoReloj
+    call modoReloj 
     hlt; congela cpu hasta que ocurra una interrupcion , por si hay no esperadas.
 
 ; bucle si ocurren interrupciones
@@ -17,14 +30,15 @@ halt_loop:
     jmp halt_loop
 
 
+; 
 ; ==================================
 ; Funciones auxiliares
 ; ==================================
 
 ; ==================================
-; Print
+; Print (Strings)
 ; ==================================
-; loop para prints
+
 print:
     push si ;guardar source index en el stack
     push ax
@@ -47,6 +61,90 @@ done_print:
     pop ax
     pop si
 
+    ret
+
+;
+; ==================================
+; Modo Alarma
+; ==================================
+
+modoAlarma:
+    call configurar_alarma
+    ; imprimir
+    ret
+
+;
+; ==================================
+; Configurar la alarma. 
+; Retorna a ModoAlarma o jmp a Error
+; ==================================
+
+configurar_alarma:
+	call install_alarm_handler
+	; Configurar alarma a las 14:35:20
+	mov ah, 06h
+	mov ch, 14h
+	mov cl, 35h
+	mov dh, 20h
+		
+	int 1Ah ; BIOS configura la alarma y sigue con la siguiente instr.
+	jc alarma_error ; MANEJAR ERRORES
+
+    ret
+
+;
+; ==================================
+; Instalar handler INT 4Ah
+; ==================================
+
+install_alarm_handler:
+    pushf ; guardar flags
+    cli ; desactivar interrupciones enmascarables
+
+    push es ; preservar es
+
+	xor ax, ax ; es lo mismo que mov ax, 0000h
+	mov es, ax ; ES = 0000h
+	
+    ; Guardar vector anterior
+    mov ax, [es:0128h]
+	mov [old_4a_offset], ax ; preservar offset viejo
+
+	mov ax, [es:012Ah]
+	mov [old_4a_segment], ax ; preservar segmento viejo
+
+    ; Instalar nuevo handler
+	mov word [es:0128h], alarm_handler ; poner el offset nuevo en IVT
+	mov word [es:012Ah], cs ; poner el segmento actual en IVT
+
+    pop es ; recuperar es
+
+    popf ; restaurar flags
+
+    ret
+
+;
+; ==================================
+; Handler INT 4Ah
+; ==================================
+
+alarm_handler:
+    ; hacer algo SENCILLO (como levantar un bit)
+    pusha
+    mov byte [cs:alarm_triggered], 1
+    popa
+    
+    iret ; como se llama desde una INT, hay que guardar FLAGS, CS, IP
+
+;
+; ==================================
+; Alarm Error
+; Usa print, ret a ModoAlarma
+; ==================================
+
+alarm_error:
+    mov si, alarm_error_msg
+    call print
     ret
 
 ;
@@ -94,12 +192,14 @@ esperar:
     je esperar ; sigue esperando si son iguales
     jmp modoReloj; si no son iguales, imprimimos otra vez
 
+; 
 ; ==================================
 ; PrintBCDTime
 ; Recibe un BCD en al y lo imprime correctamente.
 ; usa bcd_to_ascii y printChar
 ; Input: AL = BCD 
 ; ==================================
+
 printBCDTime:
     call bcd_to_ascii ; Recibe BCD en AL, devuelve en AL decenas, en AH unidades
     
@@ -115,10 +215,11 @@ printBCDTime:
 
 ;
 ; ==================================
-; BCD
+; BCD -> ASCII 
 ; Input: AL = BCD 
 ; Output: AL = decenas en ascii, AH = unidades en ascii
 ; ==================================
+
 bcd_to_ascii:
     mov ah, al
     and ah, 0Fh ; unidades en binario
@@ -133,16 +234,30 @@ bcd_to_ascii:
 ; Print Char
 ; Input: AL = char ascii a imprimir
 ; ==================================
+
 printChar:
     mov ah, 0Eh ; for teletype output, recibe al = char ascii a imprimir, bh = pagina de vide
     xor bh, bh ; 0 en bh para monitor 0
     INT 10h ; Video interrupt
     ret
 
+; 
 ; ==================================
 ; VARIABLES
 ; ==================================
+
 os_boot_msg: db 'JafiOS has booted', 0x0D, 0x0A, 0; 0 es para indicar el fin del string, hexas son new line characters 
+
+; imprimir tiempo
 time_msg: db 'Actual Time: ', 0x0D, 0x0A, 0; 
 new_line: db 0x0D, 0x0A, 0;
+
+; actualizar cada segundo
 segundo_actual: db 0
+
+; alarma
+alarm_error_msg: db 'Error: Ya existe una alarma | Fallo en RTC', 0x0D, 0x0A, 0
+alarm_triggered: db 0 
+old_4a_offset  dw 0
+old_4a_segment dw 0
+alarm_triggered db 0

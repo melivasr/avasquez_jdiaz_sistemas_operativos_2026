@@ -134,10 +134,11 @@ foundKernel:
     
     call disk_read
 
-    ; setear la memoria a la que le vamos a cargar la data del kernel
-    mov bx, kernel_load_segment ; la cargamos en 0x2000
-    mov es, bx ; en INT 13h, el buffer es es calling bx
-    mov bx, kernel_load_offset ; con un offset de cero
+    ; Configurar la dirección de memoria donde se cargará el kernel.
+    ; INT 13h utiliza ES:BX como dirección del buffer de destino.
+    mov bx, kernel_load_segment    ; BX = 2000h
+    mov es, bx                     ; ES = 2000h
+    mov bx, kernel_load_offset     ; BX = 0000h
 
 loadKernelLoop:
     mov ax, [kernel_cluster] ; current cluster that we are reading
@@ -360,8 +361,13 @@ file_kernel_bin db 'KERNEL  BIN' ; cumplir con los 11 bytes
 msg_kernel_not_found db 'KERNEL.BIN not found', 0
 kernel_cluster dw 0 ; cual cluster está? es definido por foundKernel
 
-kernel_load_segment equ 0x2000 ; reservar esta area de memoria para el kernel
-kernel_load_offset equ 0
+; UBICACION ES:BX DEL KERNEL (MAIN.ASM) EN MEMORIA = 8000h
+; KERNEN -> ES:BX = 2000:0000
+kernel_load_segment equ 0x2000 ; ES
+kernel_load_offset equ 0 ; BX
+
+; 2000h × 16 + 0000h
+; = 2000h × 10h + 0000h = 20000h + 0000h = 8000h
 
 
 ;============================
