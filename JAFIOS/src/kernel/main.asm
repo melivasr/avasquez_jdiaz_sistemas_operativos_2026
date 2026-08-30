@@ -212,7 +212,7 @@ modoReloj:
 
 esperar:
     ; DETECTAR SI VOLVER AL MENU 
-    mov ah, 00h ; INT 16h , 00h para esperar por tecla
+    mov ah, 01h ; INT 16h , 00h para esperar por tecla
     int 16h ; devuelve en AL ascii, en AH scan
 
     cmp al, 'v' ; volver al menu
@@ -283,7 +283,7 @@ printChar:
 clear:
     ; preservar reg
     push ax
-    push bh
+    push bx
     push bx
     push dx
 
@@ -308,7 +308,7 @@ clear:
 
 os_boot_msg: db 'JafiOS has booted !', 0x0D, 0x0A, 0; 0 es para indicar el fin del string, hexas son new line characters 
 menu_msg: db 'Welcome to JafiOS Menu!', 0x0D, 0x0A, 0
-menu_options_msg: db 'R = Modo Reloj, A = Modo Alarma, V = Volver al menú', 0x0D, 0x0A, 0
+menu_options_msg: db 'R = Modo Reloj, A = Modo Alarma, V = Volver al menu', 0x0D, 0x0A, 0
 
 ; imprimir tiempo
 time_msg: db 'Actual Time: ', 0x0D, 0x0A, 0; 
