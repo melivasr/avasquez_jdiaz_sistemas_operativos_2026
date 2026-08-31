@@ -32,14 +32,3 @@ Por lo tanto, en UEFI el flujo es:
 ## Etapa de emulación
 
 Primeramente se realizará en QEMU para asegurarse que todo funcione.
-
-```bash
-# Instalar UEFI Firmware para QEMU
-
-# Linux
-brew install qemu 
-brew install edk2 # OVMF 
-find /opt/homebrew -iname "OVMF_CODE.fd" 2>/dev/null # comprobar firmware UEFI para QEMU
-find /opt/homebrew -iname "OVMF_VARS.fd" 2>/dev/null # comprobar firmware UEFI para QEMU
-```
-

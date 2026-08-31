@@ -38,6 +38,9 @@ qemu-system-i386 -fda build/main.img -rtc base=localtime
 # moverse a terminal (mac - Jafet)
 cd dev/Operativos/tarea1/avasquez_jdiaz_sistemas_operativos_2026/UEFI/JAFIOS
 
+# moverse a terminal (linux - Jafet)
+cd Documentos/Repositorios/Operativos/tarea1/avasquez_jdiaz_sistemas_operativos_2026/UEFI/JAFIOS
+
 ```
 
 Para agregar discos

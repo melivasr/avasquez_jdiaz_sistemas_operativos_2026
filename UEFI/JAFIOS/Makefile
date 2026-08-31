@@ -9,15 +9,21 @@ BOOT_SRC = $(SRC_DIR)/bootloader/boot.asm
 BOOT_OBJ = $(BUILD_DIR)/boot.o
 BOOT_EFI = $(BUILD_DIR)/EFI/BOOT/BOOTX64.EFI
 
+# archivo para guardar variables/estado de UEFI de la MV
+OVMF_VARS = $(BUILD_DIR)/OVMF_VARS.fd
+
 DISK = $(BUILD_DIR)/disk.img
 
-all: $(DISK)
+all: $(DISK) $(OVMF_VARS)
 
 #
 # Crear directorios
 #
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
+
+$(OVMF_VARS): | $(BUILD_DIR) # QEMU necesita que exista el archivo en build
+	cp /usr/share/OVMF/OVMF_VARS_4M.fd $@
 
 $(BUILD_DIR)/EFI/BOOT:
 	mkdir -p $(BUILD_DIR)/EFI/BOOT
@@ -32,13 +38,12 @@ $(BOOT_OBJ): $(BOOT_SRC) | $(BUILD_DIR)
 # Linkear EFI
 #
 $(BOOT_EFI): $(BOOT_OBJ) | $(BUILD_DIR)/EFI/BOOT
-	ld -nostdlib \
-	   -znocombreloc \
-	   -Ttext 0x0 \
-	   --subsystem 10 \
-	   -e efi_main \
-	   -o $@ \
-	   $<
+	$(LD) -nostdlib \
+	      -m i386pep \
+	      --subsystem 10 \
+	      -e efi_main \
+	      -o $@ \
+	      $<
 
 #
 # Crear imagen FAT
@@ -53,11 +58,11 @@ $(DISK): $(BOOT_EFI)
 #
 # Ejecutar QEMU
 #
-run: $(DISK)
+run: $(DISK) $(OVMF_VARS)
 	qemu-system-x86_64 \
-		-drive format=raw,file=$(DISK) \
-		-bios /opt/homebrew/share/edk2/x64/OVMF_CODE.fd
-
+		-drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+		-drive if=pflash,format=raw,file=$(OVMF_VARS) \
+		-drive format=raw,file=$(DISK)
 #
 # Limpiar
 #
