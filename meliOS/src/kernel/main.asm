@@ -68,7 +68,41 @@ set_cursor:
     POP AX
     RET
 
-; Limpia la línea actual con espacios para redibujar la hora
+; Limpia la pantalla completa
+clear_screen:
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DX
+
+    MOV AH, 0x02
+    MOV BH, 0x00
+    MOV DH, 0
+    MOV DL, 0
+    INT 0x10
+
+    MOV CX, 2000
+
+clear_screen_loop:
+    MOV AL, ' '
+    MOV AH, 0x0E
+    MOV BH, 0x00
+    INT 0x10
+    LOOP clear_screen_loop
+
+    MOV AH, 0x02
+    MOV BH, 0x00
+    MOV DH, 0
+    MOV DL, 0
+    INT 0x10
+
+    POP DX
+    POP CX
+    POP BX
+    POP AX
+    RET
+
+; Limpia una línea con espacios
 clear_line:
     PUSH AX
     PUSH CX
@@ -81,6 +115,18 @@ clear_line_loop:
 
     POP CX
     POP AX
+    RET
+
+; Muestra un mensaje en la fila indicada
+show_row:
+    PUSH SI
+    MOV DL, 0
+    CALL set_cursor
+    CALL clear_line
+    MOV DL, 0
+    CALL set_cursor
+    POP SI
+    CALL print
     RET
 
 ; Convierte un byte BCD a ASCII y lo imprime
@@ -128,8 +174,10 @@ upper_done:
 
 ; Muestra el menú y espera la opción elegida
 menu_select_mode:
+    CALL clear_screen
+    MOV DH, 0 ;Posicion en pantalla
     MOV SI, menu_msg
-    CALL print
+    CALL show_row
 
 ; Opciones posibles a elegir
 menu_wait_key:
@@ -145,26 +193,30 @@ menu_wait_key:
     CMP AL, 'V'
     JE menu_select_mode
 
+    MOV DH, 1 ;Posicion donde se imprime
     MOV SI, invalid_msg
-    CALL print
+    CALL show_row
     JMP menu_wait_key
 
 ; Modo alarma
 mode_alarm:
+    MOV DH, 1 ;Posicion donde se imprime
     MOV SI, alarm_msg
-    CALL print
+    CALL show_row
     JMP wait_for_v 
 
 ; Modo reloj
 mode_clock:
+    MOV DH, 1 ;Posicion donde se imprime
     MOV SI, clock_msg
-    CALL print
+    CALL show_row
     CALL print_time_loop
 
 ; Modo chronometro
 mode_chronometer:
+    MOV DH, 1 ;Posicion donde se imprime
     MOV SI, chrono_msg
-    CALL print
+    CALL show_row
     JMP wait_for_v
 
 ;Si el usuario presiona V, vuelve al menu
@@ -187,22 +239,16 @@ print_time_loop:
 print_time_update:
     MOV AH, 02h
     INT 1Ah ; CH=horas, CL=minutos, DH=segundos (BCD)
+    MOV BH, DH ; Guarda los segundos en BH antes de cambiar DH por la fila
 
-    CMP DH, BL ; Compara el segundo actual con el anterior
+    CMP BH, BL ; Compara el segundo actual con el anterior
     JE check_for_v ; Si sigue igual, revisa si hay tecla antes de seguir
 
-    MOV BL, DH ; Guarda el segundo actual para comparar luego
+    MOV BL, BH ; Guarda el segundo actual para comparar luego
 
-    MOV DH, 3 ; Fila donde se muestra la hora
-    MOV DL, 0 ; Columna inicial de la línea
-    CALL set_cursor ; Posiciona el cursor en la línea de la hora
-    CALL clear_line ; Borra la línea actual
-    MOV DH, 3 ; Regresa a la misma fila para redibujar
-    MOV DL, 0
-    CALL set_cursor ; Regresa al inicio para redibujar
-
-    MOV SI, hora_msg ; Carga el texto "Hora actual: "
-    CALL print 
+    MOV DH, 2 ;Posicion donde se imprime 
+    MOV SI, hora_msg
+    CALL show_row
 
     MOV AL, CH ; Carga horas
     CALL print_byte_ascii
@@ -214,7 +260,7 @@ print_time_update:
     MOV AL, ':' ; Imprime dos puntos
     CALL putchar
 
-    MOV AL, DH ; Carga segundos
+    MOV AL, BH ; Carga segundos guardados
     CALL print_byte_ascii
 
 check_for_v:
