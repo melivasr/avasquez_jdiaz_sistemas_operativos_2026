@@ -16,6 +16,8 @@ sudo apt-get install qemu-system
 Ya teniendo el archivo asm
 
 ```bash
+# LEGACY 
+
 # moverse a terminal (linux - Jafet)
 cd Documentos/Repositorios/Operativos/tarea1/avasquez_jdiaz_sistemas_operativos_2026/JAFIOS
 
@@ -30,6 +32,12 @@ qemu-system-i386 -fda build/main.img
 
 # emular con qemu en RTC local
 qemu-system-i386 -fda build/main.img -rtc base=localtime
+
+# UEFI
+
+# moverse a terminal (mac - Jafet)
+cd dev/Operativos/tarea1/avasquez_jdiaz_sistemas_operativos_2026/UEFI/JAFIOS
+
 ```
 
 Para agregar discos
