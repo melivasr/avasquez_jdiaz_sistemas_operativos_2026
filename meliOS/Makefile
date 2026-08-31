@@ -25,4 +25,9 @@ kernel: $(BUILD_DIR)/kernel.bin
 $(BUILD_DIR)/kernel.bin:
 	$(ASM) $(SRC_DIR)/kernel/main.asm -f bin -o $(BUILD_DIR)/kernel.bin
 
-
+#
+# Clean
+#
+clear:
+	rm -f $(BUILD_DIR)/*.bin
+	rm -f $(BUILD_DIR)/*.img
