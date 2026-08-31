@@ -68,40 +68,6 @@ set_cursor:
     POP AX
     RET
 
-; Limpia la pantalla completa
-clear_screen:
-    PUSH AX
-    PUSH BX
-    PUSH CX
-    PUSH DX
-
-    MOV AH, 0x02
-    MOV BH, 0x00
-    MOV DH, 0
-    MOV DL, 0
-    INT 0x10
-
-    MOV CX, 2000
-
-clear_screen_loop:
-    MOV AL, ' '
-    MOV AH, 0x0E
-    MOV BH, 0x00
-    INT 0x10
-    LOOP clear_screen_loop
-
-    MOV AH, 0x02
-    MOV BH, 0x00
-    MOV DH, 0
-    MOV DL, 0
-    INT 0x10
-
-    POP DX
-    POP CX
-    POP BX
-    POP AX
-    RET
-
 ; Limpia una línea con espacios
 clear_line:
     PUSH AX
@@ -114,6 +80,34 @@ clear_line_loop:
     LOOP clear_line_loop ; Repite CX veces
 
     POP CX
+    POP AX
+    RET
+
+; Limpia la pantalla completa reutilizando clear_line.
+; Se posiciona en cada fila y borra la línea completa antes de continuar.
+clear_screen:
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DX
+
+    MOV CX, 25 ; 25 filas en modo texto estándar
+    MOV DH, 0
+
+clear_screen_loop:
+    MOV DL, 0 ; Columna inicial de la fila
+    CALL set_cursor
+    CALL clear_line ; Borra la línea actual usando la función base
+    INC DH ; Siguiente fila
+    LOOP clear_screen_loop
+
+    MOV DH, 0
+    MOV DL, 0
+    CALL set_cursor ; Devuelve el cursor al inicio
+
+    POP DX
+    POP CX
+    POP BX
     POP AX
     RET
 
@@ -279,10 +273,10 @@ check_for_v:
 
 ;Mensajes para mostrar en pantalla
 os_boot_msg: DB "meliOS is working...", 0x0D, 0x0A, 0 
-menu_msg: DB 0x0D, 0x0A, "Seleccione modo: A=Alarma   R=Reloj   C=Cronometro   V=Volver al menu", 0x0D, 0x0A, 0
+menu_msg: DB 0x0D, 0x0A, "Seleccione modo: A=Alarma  R=Reloj  C=Cronometro", 0x0D, 0x0A, 0
 invalid_msg: DB 0x0D, 0x0A, "Opcion invalida. Presione A, R, C o V.", 0x0D, 0x0A, 0
-alarm_msg: DB 0x0D, 0x0A, "Modo alarma activado.", 0x0D, 0x0A, 0
-clock_msg: DB 0x0D, 0x0A, "Modo reloj activado.", 0x0D, 0x0A, 0
-chrono_msg: DB 0x0D, 0x0A, "Modo cronometro activado.", 0x0D, 0x0A, 0
+alarm_msg: DB 0x0D, 0x0A, "Modo alarma activado, presione V para volver al menu", 0x0D, 0x0A, 0
+clock_msg: DB 0x0D, 0x0A, "Modo reloj activado, presione V para volver al menu", 0x0D, 0x0A, 0
+chrono_msg: DB 0x0D, 0x0A, "Modo cronometro activado, presione V para volver al menu", 0x0D, 0x0A, 0
 hora_msg: DB "Hora actual: ", 0 ; Texto para la hora
 new_line: DB 0x0D, 0x0A, 0 ; Salto de línea
