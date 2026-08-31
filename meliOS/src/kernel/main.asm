@@ -232,26 +232,11 @@ check_for_v:
     JMP print_time_update ; Si no es V, sigue el reloj
 
 ;Mensajes para mostrar en pantalla
-os_boot_msg:
-    DB "meliOS is working...", 0x0D, 0x0A, 0 
-
-menu_msg:
-    DB 0x0D, 0x0A, "Seleccione modo: A=Alarma   R=Reloj   C=Cronometro   V=Volver al menu", 0x0D, 0x0A, 0
-
-invalid_msg:
-    DB 0x0D, 0x0A, "Opcion invalida. Presione A, R, C o V.", 0x0D, 0x0A, 0
-
-alarm_msg:
-    DB 0x0D, 0x0A, "Modo alarma activado.", 0x0D, 0x0A, 0
-
-clock_msg:
-    DB 0x0D, 0x0A, "Modo reloj activado.", 0x0D, 0x0A, 0
-
-chrono_msg:
-    DB 0x0D, 0x0A, "Modo cronometro activado.", 0x0D, 0x0A, 0
-
-hora_msg:
-    DB "Hora actual: ", 0 ; Texto para la hora
-
-new_line:
-    DB 0x0D, 0x0A, 0 ; Salto de línea
+os_boot_msg: DB "meliOS is working...", 0x0D, 0x0A, 0 
+menu_msg: DB 0x0D, 0x0A, "Seleccione modo: A=Alarma   R=Reloj   C=Cronometro   V=Volver al menu", 0x0D, 0x0A, 0
+invalid_msg: DB 0x0D, 0x0A, "Opcion invalida. Presione A, R, C o V.", 0x0D, 0x0A, 0
+alarm_msg: DB 0x0D, 0x0A, "Modo alarma activado.", 0x0D, 0x0A, 0
+clock_msg: DB 0x0D, 0x0A, "Modo reloj activado.", 0x0D, 0x0A, 0
+chrono_msg: DB 0x0D, 0x0A, "Modo cronometro activado.", 0x0D, 0x0A, 0
+hora_msg: DB "Hora actual: ", 0 ; Texto para la hora
+new_line: DB 0x0D, 0x0A, 0 ; Salto de línea
