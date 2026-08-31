@@ -10,7 +10,7 @@ main:
     MOV SI, os_boot_msg 
     CALL print 
 
-    CALL print_time_loop ; Inicia el reloj RTC en pantalla
+    CALL menu_select_mode ; Muestra el menú y espera la seleccion del usuario
 
 halt:
     CLI ; Deshabilita las interrupciones
@@ -60,13 +60,10 @@ putchar:
 set_cursor:
     PUSH AX
     PUSH BX
-    PUSH DX
     MOV AH, 0x02 ; Función BIOS para posicionar el cursor
     MOV BH, 0x00 ; Página de video 0
-    MOV DH, 0x00 ; Fila 0
-    MOV DL, 0x00 ; Columna 0
+    ; DH = fila, DL = columna, se pasan por registros antes de llamar
     INT 0x10 ; Llama a BIOS para mover el cursor
-    POP DX
     POP BX
     POP AX
     RET
@@ -110,10 +107,80 @@ print_byte_ascii:
     POP AX
     RET
 
+
+; Lee una tecla y la devuelve en AL usando la interrupción BIOS
+; INT 16h / AH = 00h
+read_key:
+    MOV AH, 00h ; Obtiene una tecla del buffer del teclado
+    INT 16h ; AL = carácter ASCII, AH = código de scan
+    RET
+
+; Convierte una letra minúscula a mayúscula
+upper_case:
+    CMP AL, 'a'
+    JB upper_done
+    CMP AL, 'z'
+    JA upper_done
+    SUB AL, 0x20
+
+upper_done:
+    RET
+
+; Muestra el menú y espera la opción elegida
+menu_select_mode:
+    MOV SI, menu_msg
+    CALL print
+
+; Opciones posibles a elegir
+menu_wait_key:
+    CALL read_key
+    CALL upper_case
+
+    CMP AL, 'A'
+    JE mode_alarm
+    CMP AL, 'R'
+    JE mode_clock
+    CMP AL, 'C'
+    JE mode_chronometer
+    CMP AL, 'V'
+    JE menu_select_mode
+
+    MOV SI, invalid_msg
+    CALL print
+    JMP menu_wait_key
+
+; Modo alarma
+mode_alarm:
+    MOV SI, alarm_msg
+    CALL print
+    JMP wait_for_v 
+
+; Modo reloj
+mode_clock:
+    MOV SI, clock_msg
+    CALL print
+    CALL print_time_loop
+
+; Modo chronometro
+mode_chronometer:
+    MOV SI, chrono_msg
+    CALL print
+    JMP wait_for_v
+
+;Si el usuario presiona V, vuelve al menu
+
+wait_for_v:
+    CALL read_key
+    CALL upper_case
+
+    CMP AL, 'V'
+    JE menu_select_mode
+
+    JMP wait_for_v
+
 ; Bucle que actualiza la hora cada vez que cambia el segundo
 ; Usa INT 1Ah / AH=02h para leer la hora del RTC
 ; CH = horas, CL = minutos, DH = segundos (formato BCD)
-
 print_time_loop:
     MOV BL, 0xFF 
 
@@ -122,12 +189,16 @@ print_time_update:
     INT 1Ah ; CH=horas, CL=minutos, DH=segundos (BCD)
 
     CMP DH, BL ; Compara el segundo actual con el anterior
-    JE print_time_update ; Si sigue igual, espera el próximo cambio
+    JE check_for_v ; Si sigue igual, revisa si hay tecla antes de seguir
 
     MOV BL, DH ; Guarda el segundo actual para comparar luego
 
-    CALL set_cursor ; Posiciona el cursor al inicio de la línea
+    MOV DH, 3 ; Fila donde se muestra la hora
+    MOV DL, 0 ; Columna inicial de la línea
+    CALL set_cursor ; Posiciona el cursor en la línea de la hora
     CALL clear_line ; Borra la línea actual
+    MOV DH, 3 ; Regresa a la misma fila para redibujar
+    MOV DL, 0
     CALL set_cursor ; Regresa al inicio para redibujar
 
     MOV SI, hora_msg ; Carga el texto "Hora actual: "
@@ -146,11 +217,38 @@ print_time_update:
     MOV AL, DH ; Carga segundos
     CALL print_byte_ascii
 
-    JMP print_time_update ; Repite el bucle para seguir actualizando la hora
+check_for_v:
+    MOV AH, 01h ; INT 16h/AH=01h: comprueba si hay tecla en buffer
+    INT 16h
+    JZ print_time_update ; No hay tecla, continúa actualizando la hora
 
+    MOV AH, 00h ; INT 16h/AH=00h: lee la tecla
+    INT 16h
+    CALL upper_case
 
+    CMP AL, 'V'
+    JE menu_select_mode
+
+    JMP print_time_update ; Si no es V, sigue el reloj
+
+;Mensajes para mostrar en pantalla
 os_boot_msg:
     DB "meliOS is working...", 0x0D, 0x0A, 0 
+
+menu_msg:
+    DB 0x0D, 0x0A, "Seleccione modo: A=Alarma   R=Reloj   C=Cronometro   V=Volver al menu", 0x0D, 0x0A, 0
+
+invalid_msg:
+    DB 0x0D, 0x0A, "Opcion invalida. Presione A, R, C o V.", 0x0D, 0x0A, 0
+
+alarm_msg:
+    DB 0x0D, 0x0A, "Modo alarma activado.", 0x0D, 0x0A, 0
+
+clock_msg:
+    DB 0x0D, 0x0A, "Modo reloj activado.", 0x0D, 0x0A, 0
+
+chrono_msg:
+    DB 0x0D, 0x0A, "Modo cronometro activado.", 0x0D, 0x0A, 0
 
 hora_msg:
     DB "Hora actual: ", 0 ; Texto para la hora
