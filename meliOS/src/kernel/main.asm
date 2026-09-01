@@ -208,10 +208,108 @@ mode_clock:
 
 ; Modo chronometro
 mode_chronometer:
+    ; Inicializa el cronómetro en estado pausado y con tiempo acumulado = 0.
+    ; chrono_running = 0  -> cronometro detenido
+    ; chrono_elapsed_low/high = 0 -> tiempo acumulado = 0
+    XOR AX, AX
+    MOV [chrono_running], AL
+    MOV [chrono_elapsed_low], AX
+    MOV [chrono_elapsed_high], AX
+    ; Fuerza el primer dibujo del tiempo como 00:00:00.
+    MOV AX, 0FFFFh
+    MOV [chrono_last_seconds], AX
+    ; Muestra el título y las instrucciones del cronómetro.
     MOV DH, 1 ;Posicion donde se imprime
     MOV SI, chrono_msg
     CALL show_row
-    JMP wait_for_v
+    MOV DH, 2
+    MOV SI, chrono_controls_msg
+    CALL show_row
+    CALL chrono_update
+
+chrono_loop:
+    ; Actualiza el valor visible del cronómetro en cada iteración.
+    CALL chrono_update
+
+    ; Consulta si hay una tecla presionada sin bloquear el conteo.
+    MOV AH, 01h
+    INT 16h
+    JZ chrono_loop
+
+    ; Si hubo tecla, la lee, si es minuscula se pasa a mayúscula.
+    MOV AH, 00h
+    INT 16h
+    CALL upper_case
+
+    ; Comandos del cronómetro:
+    ; I = iniciar/reanudar, P = pausar, R = reiniciar, V = volver al menú.
+    CMP AL, 'I'
+    JE chrono_start
+    CMP AL, 'P'
+    JE chrono_pause
+    CMP AL, 'R'
+    JE chrono_reset
+    CMP AL, 'V'
+    JE menu_select_mode
+    JMP chrono_loop
+
+chrono_start:
+    MOV AL, [chrono_running]
+    CMP AL, 1
+    JE chrono_loop
+    ; Guarda el tick actual del BIOS para usarlo como referencia.
+    ; Luego, cada actualización de tiempo restará este valor
+    ; al tick actual para obtener el intervalo transcurrido.
+    CALL get_bios_ticks
+    MOV [chrono_start_high], CX
+    MOV [chrono_start_low], DX
+    ; Activa el cronómetro.
+    MOV AL, 1
+    MOV [chrono_running], AL
+    JMP chrono_loop
+
+chrono_pause:
+    ; Si el cronómetro ya está detenido, no hay nada que pausar.
+    ; chrono_running = 0 => parado, chrono_running = 1 => corriendo.
+    MOV AL, [chrono_running]
+    OR AL, AL
+    JE chrono_loop
+
+    ; Antes de detenerlo, guardamos el tiempo transcurrido desde el último inicio
+    CALL chrono_current_interval
+
+    ; Después de guardar el intervalo, marcamos el cronómetro como detenido.
+    ; Esto evita que siga sumando tiempo mientras está pausado.
+    XOR AX, AX
+    MOV [chrono_running], AL
+
+    ; Forzamos una actualización de la pantalla para que el último valor visible
+    ; sea redibujado inmediatamente al pausar.
+    MOV AX, 0FFFFh
+    MOV [chrono_last_seconds], AX
+    JMP chrono_loop
+
+chrono_reset:
+    ; Reinicia el cronómetro a cero.
+    ; Primero borramos el tiempo acumulado guardado en chrono_elapsed_low/high.
+    XOR AX, AX
+    MOV [chrono_elapsed_low], AX
+    MOV [chrono_elapsed_high], AX
+
+    ; Se fuerza la actualización de la pantalla para que el cronómetro muestre 00:00:00
+    ; aunque el cronómetro se estaba mostrando en otro valor antes del reinicio.
+    MOV AX, 0FFFFh
+    MOV [chrono_last_seconds], AX
+
+    ; Si el cronómetro estaba corriendo, se redefine el punto de inicio para que
+    ; el tiempo nuevo comience a contar desde este instante exacto.
+    MOV AL, [chrono_running]
+    OR AL, AL
+    JE chrono_loop
+    CALL get_bios_ticks
+    MOV [chrono_start_high], CX
+    MOV [chrono_start_low], DX
+    JMP chrono_loop
 
 ;Si el usuario presiona V, vuelve al menu
 
@@ -223,6 +321,139 @@ wait_for_v:
     JE menu_select_mode
 
     JMP wait_for_v
+
+; Lee el contador de ticks desde medianoche: CX:DX.
+; INT 1Ah / AH=00h devuelve la hora del sistema en ticks del RTC,
+; medidos desde la medianoche. La pareja CX:DX representa un contador
+; de 32 bits; CX es la parte alta y DX la parte baja.
+; Este valor se usa para medir intervalos de tiempo en el cronómetro.
+get_bios_ticks:
+    MOV AH, 00h
+    INT 1Ah
+    RET
+
+; Acumula el tiempo transcurrido desde la última reanudación.
+; El cronómetro guarda dos cantidades:
+;   - chrono_start_low/high: tick del BIOS en el momento de iniciar/reanudar
+;   - chrono_elapsed_low/high: tiempo total ya medido antes de este instante
+; El intervalo actual se calcula como:
+;   intervalo = ticks_actuales - ticks_inicio
+; y luego se suma a chrono_elapsed.
+chrono_current_interval:
+    ; Lee el tick actual del BIOS.
+    ; INT 1Ah/AH=00h devuelve CX:DX = contador de ticks desde medianoche.
+    CALL get_bios_ticks
+    ; Resta el punto de inicio para obtener cuántos ticks han pasado
+    ; desde que se activó o reanudó el cronómetro.
+    SUB DX, [chrono_start_low]
+    SBB CX, [chrono_start_high]
+    ADD [chrono_elapsed_low], DX
+    ADC [chrono_elapsed_high], CX
+    RET
+
+; Actualiza el valor mostrado solo al cambiar el segundo.
+chrono_update:
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DX
+
+    ; Parte del tiempo acumulado durante pausas anteriores.
+    MOV DX, [chrono_elapsed_low]
+    MOV CX, [chrono_elapsed_high]
+    MOV AL, [chrono_running]
+    OR AL, AL
+    JE chrono_convert_values
+    ; Si corre, añade ticks_actuales - ticks_de_inicio.
+    PUSH CX
+    PUSH DX
+    CALL get_bios_ticks
+    ; CX:DX queda con el intervalo que está corriendo ahora.
+    SUB DX, [chrono_start_low]
+    SBB CX, [chrono_start_high] ;Resta el tiempo de inicio para obtener el intervalo actual
+    POP BX  ; Recupera la parte baja acumulada.
+    ADD DX, BX
+    POP BX  ; Recupera la parte alta acumulada.
+    ADC CX, BX ;Suma el acarreo a la parte alta.
+
+chrono_convert_values:
+    ;El tiempo acumulado viene en ticks del BIOS.
+    ;Como 1 segundo ≈ 18 ticks, la fórmula es:
+    ;segundos = total_ticks / 18
+    ;(se usa DIV para hacer la división entera).
+    MOV AX, DX
+    MOV DX, CX
+    MOV BX, 18
+    DIV BX  ; AX = segundos transcurridos.
+
+    ;Si el valor de segundos no cambió, no hay que redibujar.
+    CMP AX, [chrono_last_seconds]
+    JE chrono_update_done
+    MOV [chrono_last_seconds], AX
+
+    ;Ahora convertimos el total de segundos a horas/minutos/segundos:
+    ;horas = segundos_totales / 3600
+    ;resto = segundos_totales % 3600
+    XOR DX, DX
+    MOV BX, 3600
+    DIV BX ; AX = horas, DX = resto (segundos restantes).
+    MOV [chrono_hours], AL
+
+    ;minutos = resto / 60
+    ;segundos = resto % 60
+    MOV AX, DX
+    XOR DX, DX
+    MOV BX, 60
+    DIV BX ; AX = minutos, DX = segundos.
+    MOV [chrono_minutes], AL
+    MOV [chrono_seconds], DL
+
+    ;Muestra/ imprime HH:MM:SS.
+    MOV DH, 4
+    MOV SI, chrono_time_msg
+    CALL show_row
+    MOV AL, [chrono_hours]
+    CALL print_byte_decimal
+    MOV AL, ':'
+    CALL putchar
+    MOV AL, [chrono_minutes]
+    CALL print_byte_decimal
+    MOV AL, ':'
+    CALL putchar
+    MOV AL, [chrono_seconds]
+    CALL print_byte_decimal
+
+;Restaura registros y retorna
+chrono_update_done:
+    POP DX
+    POP CX
+    POP BX
+    POP AX
+    RET
+
+; Imprime AL (0..99) como dos dígitos decimales.
+; por ejemplo segundos/minutos/horas del cronómetro.
+print_byte_decimal:
+    PUSH AX
+    PUSH BX
+    ; AL = valor decimal a imprimir, máximo 99.
+    ; Se convierte a dos cifras decimales: decenas y unidades.
+    XOR AH, AH ; AH = 0 para que AX = AL.
+    MOV BL, 10
+    DIV BL ; AL = cociente (decenas), AH = resto (unidades).
+
+    ; Imprime la cifra de las decenas.
+    ADD AL, '0'
+    CALL putchar
+
+    ; Imprime la cifra de las unidades.
+    MOV AL, AH
+    ADD AL, '0'
+    CALL putchar
+
+    POP BX
+    POP AX
+    RET
 
 ; Bucle que actualiza la hora cada vez que cambia el segundo
 ; Usa INT 1Ah / AH=02h para leer la hora del RTC
@@ -277,6 +508,19 @@ menu_msg: DB 0x0D, 0x0A, "Seleccione modo: A=Alarma  R=Reloj  C=Cronometro", 0x0
 invalid_msg: DB 0x0D, 0x0A, "Opcion invalida. Presione A, R, C o V.", 0x0D, 0x0A, 0
 alarm_msg: DB 0x0D, 0x0A, "Modo alarma activado, presione V para volver al menu", 0x0D, 0x0A, 0
 clock_msg: DB 0x0D, 0x0A, "Modo reloj activado, presione V para volver al menu", 0x0D, 0x0A, 0
-chrono_msg: DB 0x0D, 0x0A, "Modo cronometro activado, presione V para volver al menu", 0x0D, 0x0A, 0
+
+chrono_msg: DB "Modo cronometro", 0
+chrono_controls_msg: DB "I=Iniciar/Reanudar  P=Pausar  R=Reiniciar  V=Volver", 0
+chrono_time_msg: DB "Tiempo: ", 0
 hora_msg: DB "Hora actual: ", 0 ; Texto para la hora
 new_line: DB 0x0D, 0x0A, 0 ; Salto de línea
+
+chrono_running: DB 0
+chrono_start_low: DW 0
+chrono_start_high: DW 0
+chrono_elapsed_low: DW 0
+chrono_elapsed_high: DW 0
+chrono_last_seconds: DW 0
+chrono_hours: DB 0
+chrono_minutes: DB 0
+chrono_seconds: DB 0
