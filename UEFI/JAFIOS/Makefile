@@ -5,16 +5,22 @@ LD = ld
 SRC_DIR = src
 BUILD_DIR = build
 
+# variables de boot
 BOOT_SRC = $(SRC_DIR)/bootloader/boot.asm
 BOOT_OBJ = $(BUILD_DIR)/boot.o
 BOOT_EFI = $(BUILD_DIR)/EFI/BOOT/BOOTX64.EFI
+
+# variables del kernel
+KERNEL_SRC = $(SRC_DIR)/kernel/main.asm
+KERNEL_OBJ = $(BUILD_DIR)/main.o
+KERNEL_BIN = $(BUILD_DIR)/main.bin
 
 # archivo para guardar variables/estado de UEFI de la MV
 OVMF_VARS = $(BUILD_DIR)/OVMF_VARS.fd
 
 DISK = $(BUILD_DIR)/disk.img
 
-all: $(DISK) $(OVMF_VARS)
+all: $(DISK) $(OVMF_VARS) $(KERNEL_BIN)
 
 #
 # Crear directorios
@@ -29,10 +35,18 @@ $(BUILD_DIR)/EFI/BOOT:
 	mkdir -p $(BUILD_DIR)/EFI/BOOT
 
 #
-# Ensamblar bootloader
+# Ensamblar bootloader y kernel
 #
 $(BOOT_OBJ): $(BOOT_SRC) | $(BUILD_DIR)
 	$(ASM) -f elf64 $< -o $@
+
+$(KERNEL_OBJ): $(KERNEL_SRC) | $(BUILD_DIR)
+	$(ASM) -f elf64 $< -o $@
+
+# Toma el .ELF y produce un .BIN plano 
+# con el contenido de sus secciones cargables.
+$(KERNEL_BIN): $(KERNEL_OBJ)
+	objcopy -O binary $< $@
 
 #
 # Linkear EFI
@@ -46,14 +60,15 @@ $(BOOT_EFI): $(BOOT_OBJ) | $(BUILD_DIR)/EFI/BOOT
 	      $<
 
 #
-# Crear imagen FAT
+# Crear imagen de disco FAT
 #
-$(DISK): $(BOOT_EFI)
+$(DISK): $(BOOT_EFI) $(KERNEL_BIN)
 	dd if=/dev/zero of=$(DISK) bs=1M count=64
 	mkfs.fat -F 32 $(DISK)
 	mmd -i $(DISK) ::/EFI
 	mmd -i $(DISK) ::/EFI/BOOT
 	mcopy -i $(DISK) $(BOOT_EFI) ::/EFI/BOOT/BOOTX64.EFI
+	mcopy -i $(DISK) $(KERNEL_BIN) ::/main.bin
 
 #
 # Ejecutar QEMU
