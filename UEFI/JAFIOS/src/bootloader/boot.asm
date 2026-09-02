@@ -11,7 +11,6 @@ EFI_SYSTEM_TABLE_RUNTIME_SERVICES equ 0x58 ; offset a Runtime Services
 EFI_SYSTEM_TABLE_CON_OUT_SERVICES equ 0x40 ; offset a ConOut Services
 
 EFI_LOCATE_PROTOCOL_off equ 0x140 ; FUNCTION FROM Boot Services
-EFI_GET_TIME_PROTOCOL_off
 
 EFI_OPEN_VOLUME_off equ 0x8 ; FUNCTION FROM SIMPLE FS
 
@@ -53,7 +52,7 @@ efi_main:
     
     ; Obtener ConOut Services
     mov rax, [rdi + EFI_SYSTEM_TABLE_CON_OUT_SERVICES]
-    mov [rel conout_info] ; guardar puntero a CONOUT SERVICES en conout_info
+    mov [rel conout_info], rax ; guardar puntero a CONOUT SERVICES en conout_info
 
     ; Obtener BOOT SERVICES
     mov rax, [rdi + EFI_SYSTEM_TABLE_BOOT_SERVICES] ; rax apunta a boot services
@@ -173,8 +172,8 @@ read_file:
     cmp rax, 0
     jne read_error ; EFI_SUCCESS
 
-    cmp qword [rel main_size], 1 ; Verificar size esperado
-    jne read_error 
+    cmp qword [rel main_size], 0 ; Verificar size esperado
+    je read_error 
 
 ;
 ; ========================================================
@@ -223,7 +222,7 @@ root: dq 0 ; root pointer
 
 filename: dw 'm','a','i','n','.','b','i','n',0
 main_file: dq 0 ; main pointer
-main_size: dq 1 ; size of main
+main_size: dq 4096 ; size maxima de main
 main_buffer: times 4096 db 0 ; puntero a la dirección 0 del main
 
 runtime_info: dq 0 ; Puntero a pasar al main.asm / kernel

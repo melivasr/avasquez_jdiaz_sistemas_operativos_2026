@@ -14,6 +14,7 @@ BOOT_EFI = $(BUILD_DIR)/EFI/BOOT/BOOTX64.EFI
 KERNEL_SRC = $(SRC_DIR)/kernel/main.asm
 KERNEL_OBJ = $(BUILD_DIR)/main.o
 KERNEL_BIN = $(BUILD_DIR)/main.bin
+KERNEL_ELF = $(BUILD_DIR)/main.elf
 
 # archivo para guardar variables/estado de UEFI de la MV
 OVMF_VARS = $(BUILD_DIR)/OVMF_VARS.fd
@@ -43,9 +44,13 @@ $(BOOT_OBJ): $(BOOT_SRC) | $(BUILD_DIR)
 $(KERNEL_OBJ): $(KERNEL_SRC) | $(BUILD_DIR)
 	$(ASM) -f elf64 $< -o $@
 
-# Toma el .ELF y produce un .BIN plano 
-# con el contenido de sus secciones cargables.
-$(KERNEL_BIN): $(KERNEL_OBJ)
+$(KERNEL_ELF): $(KERNEL_OBJ)
+	$(LD) -nostdlib \
+	      -e kernel_main \
+	      -o $@ \
+	      $<
+
+$(KERNEL_BIN): $(KERNEL_ELF)
 	objcopy -O binary $< $@
 
 #
