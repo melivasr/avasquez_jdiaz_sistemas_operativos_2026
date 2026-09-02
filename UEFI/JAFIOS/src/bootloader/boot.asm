@@ -4,25 +4,27 @@ bits 64 ; UEFI funciona en ambiente de 64
 default rel ; direccionamiento relativo para UEFI x86-64 
 
 ; ============================================================
-; CONSTANTES DE TABLA UEFI
-; En ConOut = 0x4 = Reset, 0x8 = OutputString.
+; CONSTANTES UEFI
 ; ============================================================
-EFI_SYSTEM_TABLE_BOOT_SERVICES equ 0x60 ; TABLA GENERAL
-EFI_LOCATE_PROTOCOL_off equ 0x140 ; offset del servicio de LOCATE PROTOCOL
+EFI_SYSTEM_TABLE_BOOT_SERVICES equ 0x60 ; Offset a Boot Services 
+EFI_SYSTEM_TABLE_RUNTIME_SERVICES equ 0x58 ; offset a Runtime Services
+EFI_SYSTEM_TABLE_CON_OUT_SERVICES equ 0x40 ; offset a ConOut Services
 
-EFI_OPEN_VOLUME_off equ 0x8 ; offset para abrir volumen desde LOCATE PROTOCOL
+EFI_LOCATE_PROTOCOL_off equ 0x140 ; FUNCTION FROM Boot Services
+EFI_GET_TIME_PROTOCOL_off
 
-; Offsets dentro de Open Volumel en root
-EFI_FILE_OPEN_off equ 0x8
-EFI_FILE_READ_off equ 0x20
+EFI_OPEN_VOLUME_off equ 0x8 ; FUNCTION FROM SIMPLE FS
 
-EFI_ConOut_off equ 0x40 ; offset a ConOut
+; Offsets para funciones de root or other children (instancia de EFI_FILE_PROTOCOL)
+EFI_FILE_OPEN_off equ 0x8 ; FUNCTION from File Protocol
+EFI_FILE_READ_off equ 0x20 ; FUNCTION from File Protocol 
+
 EFI_TEXT_OUT_PROTOCOL_off equ 0x8 ; offset del servicio de OutputString desde ConOut
 
 ; ============================================================
-; GUID (Globally Unique Identifier)
+; GUID (Globally Unique Identifier) -> usado en Locate Protocol
 ; identificador de 128 bits (16 bytes) 
-; de protocolos y estructuras en UEFI.
+; de protocolos y estructuras en UEFI. 
 ; ============================================================
 
 ; GUID de FileSystem = 0964e5b22-6459-11d2-8e39-00a0c969723b
@@ -32,51 +34,75 @@ EFI_simple_fs_guid:
     dw 11d2h
     db 8eh, 39h, 00h, 0a0h, 0c9h, 69h, 72h, 3bh
 
+;
 ; ============================================================
 ; INICIO DEL BOOTLOADER 
 ; UEFI carga BOOTX64.EFI e inicia a ejecutar desde esta etiqueta
+; UEFI entrega la EFI_SYSTEM_TABLE en rdx
 ; ============================================================
 
 ; Punto de entrada para que UEFI ejecute el programa 
 global efi_main ; global hace visible al Linker
 
 efi_main: 
-    mov rdi, rdx ; UEFI pone en RDX un puntero a EFI_SYSTEM_TABLE. 
-    ; se conserva RBX  para acceder a ConOut -> llamar a OutputString.
+    mov rdi, rdx ; guardar puntero a SysTable en RDI
 
-    ; Inicio de la tabla
+    ; Obtener RUNTIME SERVICES 
+    mov rax, [rdi + EFI_SYSTEM_TABLE_RUNTIME_SERVICES]
+    mov [rel runtime_info], rax ; guardar puntero a RUNTIME SERVICES en runtime_info
+    
+    ; Obtener ConOut Services
+    mov rax, [rdi + EFI_SYSTEM_TABLE_CON_OUT_SERVICES]
+    mov [rel conout_info] ; guardar puntero a CONOUT SERVICES en conout_info
+
+    ; Obtener BOOT SERVICES
     mov rax, [rdi + EFI_SYSTEM_TABLE_BOOT_SERVICES] ; rax apunta a boot services
 
-    ; Preparar LOCATE PROTOCOL 
-    ; RAX = LOCATE PROTOCOL
-    ; Input: RCX = GUID, RDX = REGISTRATION
-    ; Output: R8 = INTERFACE
-    lea rcx, [rel EFI_simple_fs_guid] ; rcx apunta a GUID de FS (lea carga direccion)
+;
+; ========================================================
+; LOCATE PROTOCOL -> Obtener la interfaz Simple File 
+; RAX = LOCATE PROTOCOL
+; Input: RCX = GUID, RDX = REGISTRATION
+; Output: R8 = INTERFACE
+; ========================================================
+
+locate_protocol:
+    ; Preparar argumentos
+    lea rcx, [rel EFI_simple_fs_guid] ; cargar guid del protocolo deseado
     xor edx, edx ; Registration = 0
     lea r8, [rel fs_protocol] ; Interfaz = &FS_Protocol (puntero)
+
+    ; Obtener puntero a LocateProtocol
     mov rax, [rax + EFI_LOCATE_PROTOCOL_off] ; movernos en la tabla a LOCATE PROTOCOL
-    sub rsp, 32 ; reserva 4x4=32 en el stack para los 4 args (shadow space reservation)
+
+    sub rsp, 32 ; reserva 4x8=32 en el stack para los 4 args (shadow space reservation)
     call rax ; llamar a LOCATE PROTOCOL
     add rsp, 32 ; restaurar la pila
 
+    ; Verificación
     cmp rax, 0 ; EFI_SUCCES = 0
     jne locate_error ; Si RAX != 0, no se pudo localizar el protocolo
 
     cmp qword [rel fs_protocol], 0 ; verificar que se haya cargado el protocolo
     je locate_error 
 
-    ; ========================================================
-    ; OPEN VOLUME
-    ; ========================================================
+;
+; ========================================================
+; OPEN VOLUME -> Abrir root y otorgarle interfaz efi_file_protocol
+; CALL / RETURN : OpenVolume offset = RAX
+; IN: RCX = This (EFI_Simple_File_System_Protocol)
+; OUT: RDX = &Root 
+; ========================================================
 
+open_volume:
     ; Obtener puntero a OpenVolume
-    mov rax, [rel fs_protocol] ; rax = FS protocol
+    mov rax, [rel fs_protocol] ; rax = Simple File System protocol
     mov rax, [rax + EFI_OPEN_VOLUME_off] ; RAX = openVolume
 
-    ; RAX = Open volume tiene:
-    ; RCX = fs_protocol, RDX = direccion donde guardar root
-    mov rcx, [rel fs_protocol]
+    ; Preparar argumentos
+    mov rcx, [rel fs_protocol] ; this
     lea rdx, [rel root]
+
     sub rsp, 32 ; reservar shadow space
     call rax
     add rsp, 32 ; restaurar shadow space
@@ -88,18 +114,20 @@ efi_main:
     cmp qword [rel root], 0 ; ver si la root cambia.
     je volume_error
 
-    ; ========================================================
-    ; OPEN FILE
-    ; RCX = This, RDX = NewHandle, R8 = FileName, R9 = OpenMode
-    ; Stack = Attributes
-    ; OpenMode = EFI_FILE_MODE_READ = 0x0000000000000001
-    ; Attributes = 0
-    ; ========================================================
+;
+; ========================================================
+; OPEN FILE
+; RCX = This, RDX = NewHandle (OUT), R8 = FileName, R9 = OpenMode
+; Stack = Attributes
+; OpenMode = EFI_FILE_MODE_READ = 0x0000000000000001
+; Attributes = 0
+; ========================================================
 
-    mov rax, [rel root] ; EFI FILE PROTOCOL
+open_file:
+    mov rax, [rel root] ; EFI FILE PROTOCOL = instancia root
     mov rcx, rax ; guardar EFI FILE PROTOCOL (THIS)
 
-    lea rdx, [rel main_file]
+    lea rdx, [rel main_file] ; Vamos a abrir main.bin
     lea r8, [rel filename]
     mov r9, 1
     mov rax, [rax + EFI_FILE_OPEN_off] ; RAX = OpenFile 
@@ -121,14 +149,17 @@ efi_main:
     ; Inicio de la tabla
     mov rax, [rbx + EFI_SYSTEM_TABLE_BOOT_SERVICES] ; rax apunta a boot_services
 
-    ; ========================================================
-    ; READ FILE
-    ; RCX = main_file. RDX = &main_size, R8  = buffer para F4
-    ; ========================================================
+;
+; ========================================================
+; READ FILE
+; RCX = main_file. RDX = &main_size, R8 = & buffer hacia main
+; ========================================================
 
+read_file:
     mov rax, [rel main_file] 
-    mov rcx, rax ; RCX = This
 
+    ; Preparar argumentos
+    mov rcx, rax ; RCX = This
     lea rdx, [rel main_size]
     lea r8, [rel main_buffer]
 
@@ -145,64 +176,55 @@ efi_main:
     cmp qword [rel main_size], 1 ; Verificar size esperado
     jne read_error 
 
-    cmp byte [rel main_buffer], 0xF4 ; comprombar halt
-    jne read_error
+;
+; ========================================================
+; JUMP TO KERNEL
+; En main_buffer se encuentra el puntero a main.asm
+; Antes de saltar, hay que pasarle como "parametros"
+; RCX = runtime_info
+; RDX = conout_info
+; RAX = &main_buffer
+; ========================================================
 
-    ; ========================================================
-    ; TEXT OUTPUT PROTOCOL
-    ; RAX = TEXT OUTPUT CHAR-16 (word)
-    ; Hay que moverse a ConOut
-    ; Protocolo de salida de texto de UEFI. En x86-64, tiene offset 0x40 (64 bytes).
-    ; ========================================================
-    ; EFI_SYSTEM_TABLE + 0x40 = ConOut
-    mov rcx, [rdi + EFI_ConOut_off]
-    ; ConOut + 0x08 = OutputString
-    mov rax, [rcx + EFI_TEXT_OUT_PROTOCOL_off]
-    ; Segundo argumento = cadena UTF-16
-    lea rdx, [rel msg]
-    ; Shadow space
-    sub rsp, 32
-    ; ConOut->OutputString(ConOut, msg)
-    call rax
-    ; Restaurar stack
-    add rsp, 32
+mov rcx, [rel runtime_info]
+mov rdx, [rel conout_info]
+lea rax, [rel main_buffer] ; mov devolveria la primera instr
+jmp rax
 
+boot_end:
     ; RETORNAR A UEFI CON EXITO
     xor eax, eax ; limpiar ax
     ret ; en UEFI, retorno = 0 representa EFI_SUCCESS
 
 ;
-boot_end:
-;
 
-; LOOP por si no sirve el LOCATE PROTOCOL
+; LOOP por si LOCATE PROTOCOL falla
 locate_error:
-    jmp locate_error
+    jmp boot_end
 
 ; LOOP por si OPEN VOLUME falla
 volume_error:
-    jmp volume_error
+    jmp boot_end
 
 ; LOOP por si OPEN FILE falla
 file_error:
-    jmp file_error
-
+    jmp boot_end
+; LOOP por si READ FILE falla
 read_error:
-    jmp read_error
+    jmp boot_end
 
 ;
 ; ============================================================
 ; VARIABLES
 ; ============================================================
 
-msg: dw 'H','e','l','l','o',' ','U','E','F','I','!',13,10,0
+fs_protocol: dq 0 ; 8 bytes para puntero a FileSystem Protocol/Interface
+root: dq 0 ; root pointer
 
-; Open Main
 filename: dw 'm','a','i','n','.','b','i','n',0
-
-; FS
-fs_protocol: dq 0 ; 8 bytes para puntero al FileSystem
-root: dq 0 ; direccion para root
-main_file: dq 0 ; puntero a main
+main_file: dq 0 ; main pointer
 main_size: dq 1 ; size of main
-main_buffer: times 4096 db 0 ; buffer para recibir el size de main
+main_buffer: times 4096 db 0 ; puntero a la dirección 0 del main
+
+runtime_info: dq 0 ; Puntero a pasar al main.asm / kernel
+conout_info: dq 0 ; Puntero a pasar al main.asm / kernel
