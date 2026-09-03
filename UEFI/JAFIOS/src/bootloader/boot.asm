@@ -45,6 +45,9 @@ EFI_simple_fs_guid:
 global efi_main ; global hace visible al Linker
 
 efi_main: 
+    efi_main:
+    push rbx     ; corrige alineación (RSP%16 pasa de 8 a 0) y reserva rbx
+    mov rbx, rdx ; RBX = puntero a EFI_SYSTEM_TABLE (persiste entre calls)
     mov rdi, rdx ; guardar puntero a SysTable en RDI
 
     ; Obtener RUNTIME SERVICES 
@@ -199,6 +202,7 @@ jmp rax
 boot_end:
     ; RETORNAR A UEFI CON EXITO
     xor eax, eax ; limpiar ax
+    pop rbx      ; balancear la pila antes de retornar a firmware
     ret ; en UEFI, retorno = 0 representa EFI_SUCCESS
 
 ;

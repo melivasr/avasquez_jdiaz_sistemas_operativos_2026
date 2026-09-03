@@ -46,6 +46,7 @@ $(KERNEL_OBJ): $(KERNEL_SRC) | $(BUILD_DIR)
 
 $(KERNEL_ELF): $(KERNEL_OBJ)
 	$(LD) -nostdlib \
+		  -no-pie \
 	      -e kernel_main \
 	      -o $@ \
 	      $<
@@ -80,6 +81,7 @@ $(DISK): $(BOOT_EFI) $(KERNEL_BIN)
 #
 run: $(DISK) $(OVMF_VARS)
 	qemu-system-x86_64 \
+		-rtc base=localtime \
 		-drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
 		-drive if=pflash,format=raw,file=$(OVMF_VARS) \
 		-drive format=raw,file=$(DISK)
