@@ -54,8 +54,6 @@ menu_loop:
     je modo_reloj
 
     jmp menu_loop
-
-
 ;
 halt_loop:
     hlt
@@ -73,9 +71,16 @@ modo_reloj:
     call print
 
 modo_reloj_loop:
+    ; Volver al menú
+    call read_key ; devuelve ascii en ax
+    cmp ax, 'v' 
+    je menu
+
+    ; cambiar al segundo
     call get_time
     cmp al, [seg_actual]
     je modo_reloj
+
     jmp modo_reloj_loop
 
 ;
@@ -191,7 +196,7 @@ wel_msg:
     dw 13, 10, 0
 
 menu_msg:
-    utf16str "Opciones: R = Reloj, C = Cronometro, A = Alarma, E = Exit to boot"
+    utf16str "Opciones: R = Reloj, C = Cronometro, A = Alarma, E = Exit to boot, V = Volver al menu"
     dw 13, 10, 0
 
 ; recibidos desde el bootloader
