@@ -38,7 +38,7 @@ kernel_main:
     ; Boot
     lea rcx, [rel msg]
     call print
-
+;
 menu:
     ; Welcome
     lea rcx, [rel wel_msg]
@@ -46,10 +46,11 @@ menu:
     ; Menu MSG
     lea rcx, [rel menu_msg]
     call print
+;
 menu_loop:
-    call read_key
+    call read_key ; devuelve ascii en ax
 
-    cmp ax, 'r'
+    cmp ax, 'r' 
     je modo_reloj
 
     jmp menu_loop
@@ -66,8 +67,16 @@ halt_loop:
 ; ========================================================
 
 modo_reloj:
+    call get_time 
+    mov byte [seg_actual], ah ; guardar segundo actual
+    lea rcx, [rel reloj_array] ; &reloj_array
+    call print
+
+modo_reloj_loop:
     call get_time
-    
+    cmp al, [seg_actual]
+    je modo_reloj
+    jmp modo_reloj_loop
 
 ;
 ; ========================================================
@@ -94,25 +103,64 @@ read_key:
 ; Get time. Utiliza la funcion 0x00 de Runtime Services
 ; RAX = Funct Get Time (offset 0x00)
 ; IN = puntero a time (RCX), puntero a capabilities (RDX)
+; Como funcion propia, guarda la cadena de chars lista 
+; para imprimir en reloj_array
 ; ========================================================
 
 get_time:
     mov rax, [rel runtime_addr]
-    mov rcx, [rel time_pointer]
-
-    ; Shadow space
-    sub rsp, 32
+    lea rcx, [rel time_pointer]
     call rax
-    ; Restaurar stack
-    add rsp, 32
 
+    xor ax, ax
+    mov ax, [time_pointer + 4] ; hour
+    call binary_to_ascii
+    mov byte [reloj_array + 0], al ; H decenas
+    mov byte [reloj_array + 1], ah ; H unidades
+    mov byte [reloj_array + 2], ':'
+
+    xor ax, ax
+    mov ax, [time_pointer + 5] ; min
+    call binary_to_ascii
+    mov byte [reloj_array + 3], al ; MIN decenas
+    mov byte [reloj_array + 4], ah ; MIN unidades
+    mov byte [reloj_array + 5], ':'
+
+    xor ax, ax
+    mov ax, [time_pointer + 6] ; seg
+    call binary_to_ascii
+    mov byte [reloj_array + 6], al ; SEG decenas
+    mov byte [reloj_array + 7], ah ; SEG unidades
+    mov byte [reloj_array + 8], 0 ; end of string
+
+    ret
+
+;
+; ========================================================
+; Binary to ASCII
+; Numero a dividir: AX.
+; Divide el número entre 10
+; AL = decenas queda en cociente, AH = unidades en residuo
+; se suma '0' para ascii
+; ========================================================
+
+binary_to_ascii:
+    ; Divisor de 8 bits en BL
+    ; coeficiente en AL, residuo en AH
+    mov bl, 10
+    div bl
+    add al, '0'
+    add ah, '0'
     ret
 
 ;
 ; ========================================================
 ; Print, utiliza de text output protocol su funcion 0x8
 ; RAX = TEXT OUTPUT PROTOCOL
-; IN = This = ConOut (RCX), direccion de Msg (RDX)
+; CALLER: msg in RCX
+; inside ->
+; RCX: IN = This = ConOut 
+; RDX: direccion de Msg
 ; Protocolo de salida de texto de UEFI. En x86-64, tiene offset 0x40 (64 bytes).
 ; ========================================================
 print:
@@ -153,4 +201,8 @@ conin_addr: dq 0;
 
 ; Usados por func
 time_pointer: dq 0;
+seg_actual: db 0;
 key_pointer: dq 0
+
+reloj_array: dw 0;
+
