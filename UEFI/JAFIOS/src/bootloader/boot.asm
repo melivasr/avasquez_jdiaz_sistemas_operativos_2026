@@ -9,6 +9,7 @@ default rel ; direccionamiento relativo para UEFI x86-64
 EFI_SYSTEM_TABLE_BOOT_SERVICES equ 0x60 ; Offset a Boot Services 
 EFI_SYSTEM_TABLE_RUNTIME_SERVICES equ 0x58 ; offset a Runtime Services
 EFI_SYSTEM_TABLE_CON_OUT_SERVICES equ 0x40 ; offset a ConOut Services
+EFI_SYSTEM_TABLE_CON_IN_SERVICES equ 0x30 ; offset a ConIn Services
 
 EFI_LOCATE_PROTOCOL_off equ 0x140 ; FUNCTION FROM Boot Services
 
@@ -53,6 +54,10 @@ efi_main:
     ; Obtener ConOut Services
     mov rax, [rdi + EFI_SYSTEM_TABLE_CON_OUT_SERVICES]
     mov [rel conout_info], rax ; guardar puntero a CONOUT SERVICES en conout_info
+
+    ; Obtener ConIn Services
+    mov rax, [rdi + EFI_SYSTEM_TABLE_CON_IN_SERVICES]
+    mov [rel conin_info], rax ; guardar puntero a CONOUT SERVICES en conout_info
 
     ; Obtener BOOT SERVICES
     mov rax, [rdi + EFI_SYSTEM_TABLE_BOOT_SERVICES] ; rax apunta a boot services
@@ -187,6 +192,7 @@ read_file:
 
 mov rcx, [rel runtime_info]
 mov rdx, [rel conout_info]
+mov r8, [rel conin_info]
 lea rax, [rel main_buffer] ; mov devolveria la primera instr
 jmp rax
 
@@ -227,3 +233,5 @@ main_buffer: times 4096 db 0 ; puntero a la dirección 0 del main
 
 runtime_info: dq 0 ; Puntero a pasar al main.asm / kernel
 conout_info: dq 0 ; Puntero a pasar al main.asm / kernel
+conin_info: dq 0 ; Puntero a pasar al main.asm / kernel
+

@@ -24,6 +24,7 @@ global kernel_main
 ; ============================================================
 
 EFI_TEXT_OUT_PROTOCOL_off equ 0x8 ; offset del servicio de OutputString desde ConOut
+EFI_READ_KEY_PROTOCOL_off equ 0x8 ; offset del servicio de OutputString desde ConOut
 
 ; ============================================================
 ; START
@@ -31,28 +32,85 @@ EFI_TEXT_OUT_PROTOCOL_off equ 0x8 ; offset del servicio de OutputString desde Co
 
 kernel_main:
     mov [rel runtime_addr], rcx
-    mov [rel conout_addr], rdx 
-
+    mov [rel conout_addr], rdx
+    mov [rel conin_addr], r8
+    
     ; Boot
     lea rcx, [rel msg]
     call print
 
+menu:
     ; Welcome
     lea rcx, [rel wel_msg]
     call print
-
-menu:
+    ; Menu MSG
     lea rcx, [rel menu_msg]
     call print
+menu_loop:
+    call read_key
 
+    cmp ax, 'r'
+    je modo_reloj
+
+    jmp menu_loop
+
+
+;
 halt_loop:
     hlt
     jmp halt_loop
 
+;
+; ========================================================
+; Modo_Reloj
+; ========================================================
+
+modo_reloj
+
+;
+; ========================================================
+; ReadKeyStroke. Utiliza la funcion 0x08 de ConIn Services
+; RAX = Funct (offset 0x08)
+; IN = This (RCX), puntero a key (RDX)
+; Key + 2 = ascii leido
+; Devuelve ascii en ax
+; ========================================================
+
+read_key:
+    mov rcx, [rel conin_addr] ; this
+    mov rax, [rcx + EFI_READ_KEY_PROTOCOL_off]
+
+    lea rdx, [key]
+
+    call rax
+
+    mov ax, [key + 2] ; devolver ASCII es ax
+    ret
+
+;
+; ========================================================
+; Get time. Utiliza la funcion 0x00 de Runtime Services
+; RAX = Funct Get Time (offset 0x00)
+; IN = puntero a time (RCX), puntero a capabilities (RDX)
+; ========================================================
+
+get_time:
+    mov rax, [rel runtime_addr]
+    mov rcx, [rel time_pointer]
+
+    ; Shadow space
+    sub rsp, 32
+    call rax
+    ; Restaurar stack
+    add rsp, 32
+
+    ret
+
+;
 ; ========================================================
 ; Print, utiliza de text output protocol su funcion 0x8
 ; RAX = TEXT OUTPUT PROTOCOL
-; IN = This = ConOut (RCX), Msg (RDX)
+; IN = This = ConOut (RCX), direccion de Msg (RDX)
 ; Protocolo de salida de texto de UEFI. En x86-64, tiene offset 0x40 (64 bytes).
 ; ========================================================
 print:
@@ -89,3 +147,8 @@ menu_msg:
 ; recibidos desde el bootloader
 runtime_addr: dq 0;
 conout_addr: dq 0;
+conin_addr: dq 0;
+
+; Usados por func
+time_pointer: dq 0;
+key_pointer: dq 0
