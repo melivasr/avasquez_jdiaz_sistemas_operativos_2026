@@ -25,6 +25,7 @@ global kernel_main
 
 EFI_TEXT_OUT_PROTOCOL_off equ 0x8 ; offset del servicio de OutputString desde ConOut
 EFI_READ_KEY_PROTOCOL_off equ 0x8 ; offset del servicio de OutputString desde ConOut
+EFI_GET_TIME_off equ 0x18 ; offset desde Runtime
 
 ; ============================================================
 ; START
@@ -65,9 +66,8 @@ halt_loop:
 ; ========================================================
 
 modo_reloj:
-    call get_time 
-    mov byte [seg_actual], ah ; guardar segundo actual
-    lea rcx, [rel reloj_array] ; &reloj_array
+    call get_time ; devuelve 
+    lea rcx, [rel reloj_array]
     call print
 
 modo_reloj_loop:
@@ -78,8 +78,8 @@ modo_reloj_loop:
 
     ; cambiar al segundo
     call get_time
-    cmp al, [seg_actual]
-    je modo_reloj
+    ;cmp al, [seg_actual]
+    ;je modo_reloj
 
     jmp modo_reloj_loop
 
@@ -96,11 +96,11 @@ read_key:
     mov rcx, [rel conin_addr] ; this
     mov rax, [rcx + EFI_READ_KEY_PROTOCOL_off]
 
-    lea rdx, [key]
+    lea rdx, [key_pointer]
 
     call rax
 
-    mov ax, [key + 2] ; devolver ASCII es ax
+    mov ax, [key_pointer + 2] ; devolver ASCII es ax
     ret
 
 ;
@@ -114,29 +114,57 @@ read_key:
 
 get_time:
     mov rax, [rel runtime_addr]
+    mov rax, [rax + EFI_GET_TIME_off]
     lea rcx, [rel time_pointer]
+    xor edx, edx
+    sub rsp, 32
     call rax
+    add rsp, 32
 
+    ; ---- HORA ----
     xor ax, ax
     mov ax, [time_pointer + 4] ; hour
-    call binary_to_ascii
-    mov byte [reloj_array + 0], al ; H decenas
-    mov byte [reloj_array + 1], ah ; H unidades
-    mov byte [reloj_array + 2], ':'
+    call binary_to_ascii        ; AL = decenas, AH = unidades
 
+    push ax                     ; guardar ambos dígitos, vamos a pisar AX
+    lea rdx, [rel reloj_array + 0]
+    call byte_to_char16          ; escribe decenas (usa AL)
+    pop ax
+    mov al, ah                   ; ahora AL = unidades
+    lea rdx, [rel reloj_array + 2]
+    call byte_to_char16
+
+    mov word [reloj_array + 4], ':' ; separador como CHAR16
+
+    ; ---- MINUTOS ----
     xor ax, ax
     mov ax, [time_pointer + 5] ; min
     call binary_to_ascii
-    mov byte [reloj_array + 3], al ; MIN decenas
-    mov byte [reloj_array + 4], ah ; MIN unidades
-    mov byte [reloj_array + 5], ':'
 
+    push ax
+    lea rdx, [rel reloj_array + 6]
+    call byte_to_char16
+    pop ax
+    mov al, ah
+    lea rdx, [rel reloj_array + 8]
+    call byte_to_char16
+
+    mov word [reloj_array + 10], ':'
+
+    ; ---- SEGUNDOS ----
     xor ax, ax
     mov ax, [time_pointer + 6] ; seg
     call binary_to_ascii
-    mov byte [reloj_array + 6], al ; SEG decenas
-    mov byte [reloj_array + 7], ah ; SEG unidades
-    mov byte [reloj_array + 8], 0 ; end of string
+
+    push ax
+    lea rdx, [rel reloj_array + 12]
+    call byte_to_char16
+    pop ax
+    mov al, ah
+    lea rdx, [rel reloj_array + 14]
+    call byte_to_char16
+
+    mov word [reloj_array + 16], 0 ; terminador nulo CHAR16
 
     ret
 
@@ -156,6 +184,19 @@ binary_to_ascii:
     div bl
     add al, '0'
     add ah, '0'
+    ret
+;
+; ========================================================
+; byte_to_char16
+; Convierte un byte ASCII a CHAR16 (UTF-16) y lo escribe en memoria
+; IN:  AL  = byte ASCII a convertir (ej. '0'-'9')
+;      RDX = dirección destino donde escribir el CHAR16
+; OUT: [RDX] queda con el word CHAR16 correspondiente
+; Nota: no avanza RDX, eso lo maneja el caller
+; ========================================================
+byte_to_char16:
+    mov ah, 0        ; limpiar el byte alto -> AX = 0x00XX (CHAR16 válido)
+    mov [rdx], ax    ; escribir como word en destino
     ret
 
 ;
@@ -209,5 +250,5 @@ time_pointer: dq 0;
 seg_actual: db 0;
 key_pointer: dq 0
 
-reloj_array: dw 0;
+reloj_array: times 9 dw 0;
 
