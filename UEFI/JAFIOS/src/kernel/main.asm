@@ -23,9 +23,10 @@ global kernel_main
 ; CONSTANTES UEFI
 ; ============================================================
 
-EFI_TEXT_OUT_PROTOCOL_off equ 0x8 ; offset del servicio de OutputString desde ConOut
-EFI_READ_KEY_PROTOCOL_off equ 0x8 ; offset del servicio de OutputString desde ConOut
-EFI_GET_TIME_off equ 0x18 ; offset desde Runtime
+EFI_OUTPUTSTRING_off equ 0x8 ; offset del protocolo de OutputString desde ConOut
+EFI_CLEAR_off equ 0x30 ; offset del protocolo de clear screen desde ConOut
+EFI_READ_KEY_PROTOCOL_off equ 0x8 ; offset del protocolo desde ConIn
+EFI_GET_TIME_off equ 0x18 ; offset del protocolo desde Runtime
 
 ; ============================================================
 ; START
@@ -42,6 +43,7 @@ kernel_main:
 ;
 menu:
     ; Welcome
+    call clear
     lea rcx, [rel wel_msg]
     call print
     ; Menu MSG
@@ -66,6 +68,9 @@ halt_loop:
 ; ========================================================
 
 modo_reloj:
+    call clear
+    lea rcx, [rel reloj_msg]
+    call print
     mov byte [guardar_seg], 1
     call get_time ; devuelve 
     lea rcx, [rel reloj_array]
@@ -189,7 +194,7 @@ byte_to_char16:
 ;
 ; ========================================================
 ; Print, utiliza de text output protocol su funcion 0x8
-; RAX = TEXT OUTPUT PROTOCOL
+; RAX = OUTPUTSTRING
 ; CALLER: msg in RCX
 ; inside ->
 ; RCX: IN = This = ConOut 
@@ -199,11 +204,31 @@ byte_to_char16:
 print:
     mov rdx, rcx ; segundo argumento (msg) pasado por el caller en RCX
     mov rcx, [rel conout_addr]; This
-    mov rax, [rcx + EFI_TEXT_OUT_PROTOCOL_off] ; call
+    mov rax, [rcx + EFI_OUTPUTSTRING_off] ; call
 
     ; Shadow space
     sub rsp, 32
     ; ConOut->OutputString(ConOut, msg)
+    call rax
+    ; Restaurar stack
+    add rsp, 32
+
+    ret
+
+;
+; ========================================================
+; Clear, utiliza de text output protocol su funcion 0x30
+; RAX = CLEAR
+; internamente
+; RCX: IN = This = ConOut 
+; ========================================================
+clear:
+    mov rcx, [rel conout_addr]; This
+    mov rax, [rcx + EFI_CLEAR_off] ; call
+
+    ; Shadow space
+    sub rsp, 32
+    ; ConOut->ClearScreen(ConOut)
     call rax
     ; Restaurar stack
     add rsp, 32
@@ -225,6 +250,10 @@ wel_msg:
 
 menu_msg:
     utf16str "Opciones: R = Reloj, C = Cronometro, A = Alarma, E = Exit to boot, V = Volver al menu"
+    dw 13, 10, 0
+
+reloj_msg:
+    utf16str "Bienvenido al Modo Reloj! Opciones: V = Volver al menu"
     dw 13, 10, 0
 
 err_msg:
