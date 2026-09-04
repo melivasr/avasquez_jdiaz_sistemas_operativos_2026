@@ -64,6 +64,7 @@ efi_main:
 
     ; Obtener BOOT SERVICES
     mov rax, [rdi + EFI_SYSTEM_TABLE_BOOT_SERVICES] ; rax apunta a boot services
+    mov [rel boot_info], rax ; guardar puntero a BOOT SERVICES en un boot_info
 
 ;
 ; ========================================================
@@ -196,6 +197,7 @@ read_file:
 mov rcx, [rel runtime_info]
 mov rdx, [rel conout_info]
 mov r8, [rel conin_info]
+mov r9, [rel boot_info]
 lea rax, [rel main_buffer] ; mov devolveria la primera instr
 jmp rax
 
@@ -238,4 +240,4 @@ main_buffer: times 4096 db 0 ; puntero a la dirección 0 del main
 runtime_info: dq 0 ; Puntero a pasar al main.asm / kernel
 conout_info: dq 0 ; Puntero a pasar al main.asm / kernel
 conin_info: dq 0 ; Puntero a pasar al main.asm / kernel
-
+boot_info: dq 0 ; Puntero a pasar al main.asm / kernel
