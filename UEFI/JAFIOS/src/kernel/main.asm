@@ -61,11 +61,13 @@ kernel_main:
     cmp qword [rel TimerEvent], 0
     je error
 
-    ; Preparar EFI_EVENTS
+    ; Preparar EFI_EVENTS Timer
     lea rax, [rel efi_events] ; indice 0
     add rax, 0x08 ; moverse al indice 1
     mov r8, [rel TimerEvent]
-    mov [rax], r8 ; guardar WaitForKey en efi_events[1]
+    mov [rax], r8 ; guardar TimerEvent en efi_events[1]
+
+    call set_timer_event
     
     ; Boot
     lea rcx, [rel msg]
@@ -92,6 +94,9 @@ menu_loop:
 
     cmp ax, 'v'
     je modo_cron
+
+    cmp ax, 'a'
+    je modo_alarma
 
     cmp ax, 'e'
     je exit
@@ -171,8 +176,6 @@ continue_cron:
     call clear 
     lea rcx, [rel in_cron_msg]
     call print
-
-    call set_timer_event
 
     lea rcx, [rel cron_array]
     call print
@@ -288,6 +291,146 @@ reiniciar:
 
 ;
 ; ========================================================
+; Modo_Cronometro
+; ========================================================
+
+modo_alarma:
+    lea rcx, [rel alarma_msg]
+    call prints
+
+; ============================================================
+; read_alarm. Usa Read Key
+;
+; Salida:
+;   [alarm_hour]   = hora
+;   [alarm_minute] = minuto
+;
+; Ejemplo:
+;   14 35<ENTER>
+;
+; ============================================================
+
+read_alarm:
+
+    ; Inicializar
+    mov word [current_number], 0
+    mov byte [input_state], 0
+
+.read_key:
+
+    call read_key
+
+    cmp ax, 13                  ; '\r'
+    je .enter
+
+    cmp ax, ' '
+    je .space
+
+    ; digito
+
+    cmp ax, '0'
+    jb .read_key
+
+    cmp ax, '9'
+    ja .read_key
+
+    ; --------------------------------------------------------
+    ; Convertir ASCII → número
+    ;
+    ; '0' -> 0
+    ; '1' -> 1
+    ; ...
+    ; '9' -> 9
+    ; --------------------------------------------------------
+
+    sub ax, '0'
+
+    ; --------------------------------------------------------
+    ; current_number = current_number * 10 + digit
+    ; --------------------------------------------------------
+
+    movzx eax, ax
+    movzx edx, word [current_number]
+
+    imul edx, edx, 10
+    add edx, eax
+
+    mov [current_number], dx
+
+    jmp .read_key
+
+
+; ============================================================
+; SPACE
+; ============================================================
+
+.space:
+
+    cmp byte [input_state], 0
+    jne .read_key
+
+    ; --------------------------------------------------------
+    ; Estamos terminando de introducir la hora
+    ; --------------------------------------------------------
+
+    mov ax, [current_number]
+
+    ; Validar 0 <= HH <= 23
+    cmp ax, 23
+    ja .invalid
+
+    mov [alarm_hour], al
+
+    ; --------------------------------------------------------
+    ; Cambiar a modo MINUTOS
+    ; --------------------------------------------------------
+
+    mov byte [input_state], 1
+    mov word [current_number], 0
+
+    jmp .read_key
+
+
+; ============================================================
+; ENTER
+; ============================================================
+
+.enter:
+
+    ; Enter solamente es válido después de los minutos
+    cmp byte [input_state], 1
+    jne .read_key
+
+    mov ax, [current_number]
+
+    ; Validar 0 <= MM <= 59
+    cmp ax, 59
+    ja .invalid
+
+    mov [alarm_minute], al
+
+    ret
+
+
+; ============================================================
+; Entrada inválida
+; ============================================================
+
+.invalid:
+
+    ; Aquí podrías imprimir:
+    ;
+    ; "Hora invalida"
+    ;
+    ; y volver a comenzar.
+
+    mov word [current_number], 0
+    mov byte [input_state], 0
+
+    jmp .read_key
+
+;
+; ========================================================
 ; ReadKeyStroke. Utiliza la funcion 0x08 de ConIn Services
 ; Callee:
 ; RAX = Funct (offset 0x08)
@@ -306,7 +449,7 @@ read_key:
     call rax
     add rsp, 32
 
-    mov ax, [rel key_pointer + 2] ; devolver ASCII es ax
+    mov ax, [rel key_pointer + 2] ; devolver ASCII en ax
     ret
 
 ;
@@ -523,28 +666,33 @@ wel_msg:
 menu_msg:
     utf16str "Opciones: R = Reloj, C = Cronometro, A = Alarma, E = Exit to boot"
     dw 13, 10, 0
-
+;
 reloj_msg:
     utf16str "Bienvenido al Modo Reloj! Opciones: V = Volver al menu, W = Cambiar de modo"
     dw 13, 10, 0
-
+;
 cron_msg:
     utf16str "Bienvenido al Modo Cronometro! Opciones: S = Iniciar (en 0), C = Continuar, V = Volver al menu, W = Cambiar de modo"
     dw 13, 10, 0
-
+;
 in_cron_msg:
     utf16str "Cronometro en curso!: Opciones: P = Pausar, R = Reiniciar, V = Volver al menu, W = Cambiar de modo"
     dw 13, 10, 0
-
+;
 pausa_msg:
     utf16str "Cronometro en pausa!: Opciones: C = Continuar, R = Reiniciar, V = Volver al menu, W = Cambiar de modo"
     dw 13, 10, 0
+;
+alarma_msg:
+    utf16str "Bienvenido al Modo Alarma. Ingrese la hora"
+    dw 13, 10, 0
 
+;
 err_msg:
     utf16str "GetTime FALLO"
     dw 13, 10, 0
-
-; recibidos desde el bootloader
+;
+; ADDR recibidos desde el bootloader
 runtime_addr: dq 0;
 bootServices_addr: dq 0;
 conout_addr: dq 0;
@@ -580,4 +728,14 @@ efi_events_index: dq 0
 ; De read key
 key_pointer: dq 0
 
+; Para alarma
+alarm_hour      db 0
+alarm_minute    db 0
+
+current_number  dw 0
+input_state     db 0        ; 0 = hora, 1 = minutos
+
+key:
+    dw 0                    ; ScanCode
+    dw 0                    ; UnicodeChar
 
