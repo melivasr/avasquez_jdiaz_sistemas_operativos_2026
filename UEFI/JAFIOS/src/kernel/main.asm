@@ -295,6 +295,7 @@ reiniciar:
 ; ========================================================
 
 modo_alarma:
+    call clear
     lea rcx, [rel alarma_msg]
     call prints
 
@@ -314,7 +315,7 @@ read_alarm:
 
     ; Inicializar
     mov word [current_number], 0
-    mov byte [input_state], 0
+    mov byte [input_state], 0 ; verifica si estamos en modo hora, modo min u otro
 
 .read_key:
 
@@ -326,29 +327,17 @@ read_alarm:
     cmp ax, ' '
     je .space
 
-    ; digito
-
+    ; Verificar que sea digito de 0 - 9
     cmp ax, '0'
     jb .read_key
 
     cmp ax, '9'
     ja .read_key
 
-    ; --------------------------------------------------------
-    ; Convertir ASCII → número
-    ;
-    ; '0' -> 0
-    ; '1' -> 1
-    ; ...
-    ; '9' -> 9
-    ; --------------------------------------------------------
-
+    ;  ASCII → número
     sub ax, '0'
 
-    ; --------------------------------------------------------
     ; current_number = current_number * 10 + digit
-    ; --------------------------------------------------------
-
     movzx eax, ax
     movzx edx, word [current_number]
 
@@ -369,9 +358,7 @@ read_alarm:
     cmp byte [input_state], 0
     jne .read_key
 
-    ; --------------------------------------------------------
-    ; Estamos terminando de introducir la hora
-    ; --------------------------------------------------------
+    ; Si hay espacio, se está terminando de introducir la hora
 
     mov ax, [current_number]
 
@@ -418,11 +405,8 @@ read_alarm:
 
 .invalid:
 
-    ; Aquí podrías imprimir:
-    ;
-    ; "Hora invalida"
-    ;
-    ; y volver a comenzar.
+    mov rcx, [rel alarma_err]
+    call print ; "Hora invalida"
 
     mov word [current_number], 0
     mov byte [input_state], 0
@@ -688,6 +672,10 @@ alarma_msg:
     dw 13, 10, 0
 
 ;
+alarma_err_msg:
+    utf16str "HH/MM inválido. Prueba con HH<Space>MM<Enter>"
+    dw 13, 10, 0
+;
 err_msg:
     utf16str "GetTime FALLO"
     dw 13, 10, 0
@@ -705,6 +693,7 @@ reloj_array:
     ;   0,  2,  4,  6,  8, 10, 12, 14
     dw '0','0',':','0','0',':','0','0'
     dw 13, 10, 0
+;
 guardar_seg: dw 0
 
 ; De modo cronometro
@@ -713,12 +702,12 @@ cron_array:
     ;   0,  2,  4,  6,  8, 10, 12, 14
     dw '0','0',':','0','0',':','0','0'
     dw 13, 10, 0
-
+;
 debug_array:
     ;   0,  2,  4,  6,  8, 10, 12, 14
     dw '2'
     dw 13, 10, 0
-
+;
 elapsed_seconds: dq 0
 TimerEvent: dq 0
 
