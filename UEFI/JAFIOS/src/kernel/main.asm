@@ -93,6 +93,9 @@ menu_loop:
     cmp ax, 'v'
     je modo_cron
 
+    cmp ax, 'e'
+    je exit
+
     jmp menu_loop
 ;
 halt_loop:
@@ -121,6 +124,8 @@ modo_reloj_loop:
     je menu
     cmp ax, 'w'
     je modo_cron
+    cmp ax, 'e'
+    je exit
 
     ; Revisar el tiempo y comparar si cambia
     call get_time
@@ -154,6 +159,9 @@ modo_cron_loop:
     cmp ax, 'w'
     je modo_reloj
 
+    cmp ax, 'e'
+    je exit
+
     jmp modo_cron_loop
 ;
 start_cron:
@@ -185,9 +193,9 @@ in_cron_loop:
     lea rdx, [rel efi_events]
     lea r8, [rel efi_events_index]
 
-    sub rsp, 40
+    sub rsp, 32
     call rax
-    add rsp, 40
+    add rsp, 32
 
     cmp qword [rel efi_events_index], 0
     je keyboard_ocurred
@@ -239,6 +247,8 @@ keyboard_ocurred:
     je modo_reloj
     cmp ax, 'r'
     je reiniciar
+    cmp ax, 'e'
+    je exit
     jmp in_cron_loop
 ;
 pausa:
@@ -261,6 +271,8 @@ pausa_loop:
     je in_cron_loop
     cmp ax, 'r'
     je reiniciar
+    cmp ax, 'e'
+    je exit
 
     jmp pausa_loop
 ;
@@ -290,9 +302,9 @@ read_key:
 
     lea rdx, [rel key_pointer]
 
-    sub rsp, 40
+    sub rsp, 32
     call rax
-    add rsp, 40
+    add rsp, 32
 
     mov ax, [rel key_pointer + 2] ; devolver ASCII es ax
     ret
@@ -312,9 +324,9 @@ get_time:
     mov rax, [rax + EFI_GET_TIME_off]
     lea rcx, [rel time_pointer]
     xor edx, edx
-    sub rsp, 40
+    sub rsp, 32
     call rax
-    add rsp, 40
+    add rsp, 32
 
     ; comprobar
     test rax, rax
@@ -388,7 +400,7 @@ byte_to_char16:
 ; inside -> callee:
 ; RCX: IN = This = ConOut 
 ; RDX: direccion de Msg
-; Protocolo de salida de texto de UEFI. En x86-64, tiene offset 0x40 (64 bytes).
+; Protocolo de salida de texto de UEFI. En x86-64, tiene offset 0x32 (64 bytes).
 ; ========================================================
 print:
     mov rdx, rcx ; segundo argumento (msg) pasado por el caller en RCX
@@ -396,11 +408,11 @@ print:
     mov rax, [rcx + EFI_OUTPUTSTRING_off] ; call
 
     ; Shadow space
-    sub rsp, 40
+    sub rsp, 32
     ; ConOut->OutputString(ConOut, msg)
     call rax
     ; Restaurar stack
-    add rsp, 40
+    add rsp, 32
 
     ret
 
@@ -416,11 +428,11 @@ clear:
     mov rax, [rcx + EFI_CLEAR_off] ; call
 
     ; Shadow space
-    sub rsp, 40
+    sub rsp, 32
     ; ConOut->ClearScreen(ConOut)
     call rax
     ; Restaurar stack
-    add rsp, 40
+    add rsp, 32
 
     ret
 
@@ -434,7 +446,7 @@ create_timer:
     mov rax, [rel bootServices_addr]
     mov rax, [rax + EFI_CREATE_EVENT_off]  
     ; Reservar Shadow space
-    sub rsp, 40 ; reservar 40+8 bytes en stack 
+    sub rsp, 48 ; reservar 40+8 bytes en stack 
     mov rcx, 0x80000000 ; EVT_TIMER
     mov edx, 0x04 ; Nivel de prioridad de una app normal
     xor r8d, r8d ; Sin callback
@@ -443,7 +455,7 @@ create_timer:
     lea r10, [rel TimerEvent] ; puntero al evento
     mov [rsp + 32], r10 ; 5to argumento se carga en stack
     call rax
-    add rsp, 40 ; restaurar stack
+    add rsp, 48 ; restaurar stack
 
     ret
 
@@ -460,9 +472,9 @@ set_timer_event:
     mov r8, 10000000 ; 1 segundo 
 
     ; shadow space
-    sub rsp, 40
+    sub rsp, 32
     call rax
-    add rsp, 40
+    add rsp, 32
     ret
 ;
 ; ========================================================
@@ -475,15 +487,27 @@ cancel_timer:
     mov edx, 0          ; TimerCancel
     xor r8, r8          ; TriggerTime ignorado en cancel
 
-    sub rsp, 40
+    sub rsp, 32
     call rax
-    add rsp, 40
+    add rsp, 32
     ret
 ;
+; ========================================================
+; Error no fatal
+; ========================================================
 error:
     mov rcx, [rel err_msg]
     call print
     jmp error
+
+;
+; ========================================================
+; Volver a UEFI
+; ========================================================
+exit:
+    mov rsp, rbp
+    pop rbp
+    ret
 ; ============================================================
 ; VARIABLES
 ; ============================================================

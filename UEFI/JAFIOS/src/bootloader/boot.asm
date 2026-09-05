@@ -141,11 +141,11 @@ open_file:
     mov rax, [rax + EFI_FILE_OPEN_off] ; RAX = OpenFile 
 
     ; Atrributes en el stack
-    sub rsp, 40 ; 32 de args + 8 de Attributes
+    sub rsp, 48; 32 de args + 8 de Attributes
     mov qword [rsp + 32], 0
 
     call rax 
-    add rsp, 40
+    add rsp, 48
 
     ; Verificar que el archivo se abre
     cmp rax, 0
@@ -199,7 +199,7 @@ mov rdx, [rel conout_info]
 mov r8, [rel conin_info]
 mov r9, [rel boot_info]
 lea rax, [rel main_buffer] ; mov devolveria la primera instr
-jmp rax
+call rax
 
 boot_end:
     ; RETORNAR A UEFI CON EXITO
