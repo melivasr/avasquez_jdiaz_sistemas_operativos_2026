@@ -175,6 +175,7 @@ menu_select_mode:
 
 ; Opciones posibles a elegir
 menu_wait_key:
+    CALL check_alarm_state
     CALL read_key
     CALL upper_case
 
@@ -186,18 +187,226 @@ menu_wait_key:
     JE mode_chronometer
     CMP AL, 'V'
     JE menu_select_mode
+    CMP AL, 'X'
+    JE cancel_alarm_from_menu
 
     MOV DH, 1 ;Posicion donde se imprime
     MOV SI, invalid_msg
     CALL show_row
     JMP menu_wait_key
 
+cancel_alarm_from_menu:
+    CALL cancel_alarm
+    JMP menu_wait_key
+
 ; Modo alarma
+; Pide la hora HHMMSS, la arma en el RTC y deja la alarma activa 
 mode_alarm:
-    MOV DH, 1 ;Posicion donde se imprime
-    MOV SI, alarm_msg
+    CALL read_alarm_time
+    JC mode_alarm_exit
+
+    ; Limpia el estado previo para que una alarma vieja no siga bloqueando la
+    ; siguiente programación.
+    MOV BYTE [alarm_triggered], 0 ; reinicia flag previo
+    MOV BYTE [alarm_active], 0 ; limpia estado activo 
+
+    ; Configura la alarma en el RTC usando AH=06h.
+    ; El RTC toma HH/MM/SS desde CH/CL/DH y dispara la interrupción INT 4Ah
+    ; cuando llega la hora programada. Si ya hay una alarma activa, la BIOS
+    ; devuelve CF=1 y hay que salir con un mensaje de error.
+    CALL install_alarm_handler ; reemplaza el vector de INT 4Ah con nuestro handler
+    MOV BYTE [alarm_triggered], 0 ; marca que aún no se ha ejecutado la alarma
+    MOV BYTE [alarm_active], 1 
+
+    MOV CH, [alarm_hour] ; CH = hora programada
+    MOV CL, [alarm_minute] ; CL = minuto programado
+    MOV DH, [alarm_second] ; DH = segundo programado
+    MOV AH, 06h ; AH=06h => programar alarma del RTC
+    INT 1Ah ; BIOS RTC: configura alarma con CH/CL/DH
+    JC alarm_error ; si falla, vuelve al menú con error
+
+    MOV DH, 3
+    MOV SI, alarm_set_msg
     CALL show_row
-    JMP wait_for_v 
+
+mode_alarm_wait_exit:
+    MOV AH, 01h ; AH=01h => consulta si hay tecla en buffer
+    INT 16h ; ZF=1 si no hay tecla
+    JZ mode_alarm_wait_exit ; si no hay nada, sigue esperando
+
+    MOV AH, 00h ; AH=00h => lee la tecla del teclado
+    INT 16h ; AL = ASCII de la tecla presionada
+    CALL upper_case ; convierte a mayúscula si era minúscula
+    CMP AL, 'V' ; V => salir del modo alarma y volver al menú
+    JE menu_select_mode
+    CMP AL, 'X' ; X => cancelar alarma activa y volver al menú
+    JE cancel_alarm_and_return_menu
+    JMP mode_alarm_wait_exit
+
+cancel_alarm_and_return_menu:
+    CALL cancel_alarm
+    JMP menu_select_mode
+
+mode_alarm_exit:
+    JMP menu_select_mode
+
+; Comprueba si la alarma ya llegó a la hora programada.
+; Si coincide, muestra la notificación y espera la tecla de cancelación.
+check_alarm_state:
+    CMP BYTE [alarm_active], 1 ; si no hay alarma activa, no hace nada
+    JE check_alarm_time
+    RET
+
+check_alarm_time:
+    MOV AH, 02h ; AH=02h => leer hora actual del RTC
+    INT 1Ah ; CH=horas, CL=minutos, DH=segundos
+
+    CMP CH, [alarm_hour] ;compara hora actual con la hora programada
+    JNE check_alarm_done
+    CMP CL, [alarm_minute] ;compara minutos
+    JNE check_alarm_done
+    CMP DH, [alarm_second] ;compara segundos
+    JNE check_alarm_done
+
+    CALL alarm_notify ; cuando coincide, dispara la notificación visual
+    RET
+
+check_alarm_done:
+    RET
+
+; Limpia la línea donde se muestra el mensaje de la alarma
+clear_alarm_line:
+    PUSH AX
+    PUSH DX
+    MOV DH, 5 ; fila 5 = línea del aviso de alarma
+    MOV DL, 0 ; columna 0
+    CALL set_cursor ; ubica cursor en la línea del mensaje
+    CALL clear_line ; limpia la fila completa para ocultar la alarma
+    POP DX
+    POP AX
+    RET
+
+cancel_alarm:
+    CMP BYTE [alarm_active], 1 ; solo cancela si la alarma está activa
+    JNE cancel_alarm_done
+
+    CALL clear_alarm_line ; borra el aviso visible
+    MOV BYTE [alarm_active], 0 ; desactiva el flag global
+    MOV BYTE [alarm_triggered], 0 ; limpia disparo previo
+    MOV AH, 07h ; AH=07h => desactivar alarma del RTC
+    INT 1Ah ; BIOS RTC: desarma la alarma
+    CALL restore_alarm_handler ; vuelve al handler original del sistema
+
+cancel_alarm_done:
+    RET
+
+; Muestra la alarma 
+; La cancelación se hace con la tecla X
+alarm_notify:
+    CALL clear_alarm_line ; limpia previo antes de mostrar el aviso actual
+    MOV DH, 5 ; fila donde se imprime la alarma
+    MOV SI, alarm_ring_msg ; texto: alarma activada, presione X para cancelar
+    CALL show_row ; imprime el mensaje en pantalla
+
+alarm_notify_wait:
+    MOV AH, 01h ; AH=01h => revisa si hay tecla en el buffer
+    INT 16h ; ZF=1 si no hay tecla
+    JZ alarm_notify_wait ; espera sin bloquear
+
+    MOV AH, 00h ; AH=00h => lee la tecla presionada
+    INT 16h ; AL = código ASCII de la tecla
+    CALL upper_case ; normaliza a mayúscula
+    CMP AL, 'X' ; X => cancelar la alarma actual
+    JNE alarm_notify_wait ; si no es X, sigue esperando
+
+    ; Borra el mensaje de alarma antes de salir para que desaparezca de pantalla.
+    CALL clear_alarm_line
+    CALL cancel_alarm ; desactiva la alarma y restaura el vector original
+    RET
+
+alarm_error:
+    ; Si la alarma no pudo configurarse, se quita el vector propio y se muestra
+    ; un mensaje de error para volver al menú principal.
+    CALL restore_alarm_handler
+    MOV DH, 4
+    MOV SI, alarm_invalid_msg
+    CALL show_row
+    JMP menu_select_mode
+
+; Instala el handler de la alarma del RTC en INT 4Ah.
+; El vector de interrupción 4Ah está en la IVT en offsets 0128h/012Ah.
+; Guardamos el valor anterior para poder restaurarlo al salir del modo alarma.
+install_alarm_handler:
+    PUSHF
+    CLI
+    PUSH ES
+    PUSH AX
+
+    XOR AX, AX
+    MOV ES, AX ; ES = 0000h => apuntamos a la IVT(tabla de vectores de interrupcion)
+
+    MOV AX, [ES:0128h] ; guarda offset anterior de INT 4Ah
+    MOV [old_offset], AX
+    MOV AX, [ES:012Ah] ; guarda segmento anterior de INT 4Ah
+    MOV [old_segment], AX
+
+    MOV WORD [ES:0128h], alarm_handler ; instala nuestro handler en offset 0128h
+    MOV WORD [ES:012Ah], CS ; instala segmento del código actual en 012Ah
+
+    POP AX
+    POP ES
+    POPF
+    RET
+
+; Restaura el vector del BIOS al abandonar el modo alarma. 
+restore_alarm_handler:
+    PUSHF
+    CLI
+    PUSH ES
+    PUSH AX
+
+    XOR AX, AX
+    MOV ES, AX ; ES = 0000h => apuntamos a la IVT(tabla de vectores de interrupcion)
+    MOV AX, [old_offset] ; recupera el offset original de INT 4Ah
+    MOV [ES:0128h], AX
+    MOV AX, [old_segment] ; recupera el segmento original de INT 4Ah
+    MOV [ES:012Ah], AX
+
+    POP AX
+    POP ES
+    POPF
+    RET
+
+; Handler ejecutado por IRQ8/INT 4Ah cuando el RTC dispara la alarma.
+; Se ejecuta como un servicio del hardware en respuesta a la alarma del RTC.
+; Aquí se marca la alarma como activada y se imprime el mensaje de aviso.
+alarm_handler:
+    ; Salvamos los registros que vamos a tocar para no corromper el estado de la
+    ; tarea que estaba ejecutándose cuando llegó la interrupción.
+    PUSH AX
+    PUSH DX
+    PUSH SI
+    PUSH DS
+    PUSH CS
+    POP DS
+
+    ; La alarma debe permanecer activa hasta que el usuario la cancele con X.
+    CALL clear_alarm_line ; borra contenido previo antes de mostrar la alerta
+    MOV DH, 5 ; fila 5 para el aviso visual
+    MOV SI, alarm_ring_msg ; texto de alarma activa
+    CALL show_row ; imprime la alarma
+    MOV AL, 07h ; AL=07h => pitido del sistema
+    CALL putchar ; emite un beep simple
+
+    ; alarm_triggered = 1 permite que el bucle principal salga del HLT y termine
+    ; la rutina de espera de la alarma.
+    MOV BYTE [alarm_triggered], 1 ; marca que la alarma ya disparó para el flujo principal
+
+    POP DS
+    POP SI
+    POP DX
+    POP AX
+    IRET
 
 ; Modo reloj
 mode_clock:
@@ -242,7 +451,8 @@ chrono_loop:
     CALL upper_case
 
     ; Comandos del cronómetro:
-    ; I = iniciar/reanudar, P = pausar, R = reiniciar, V = volver al menú.
+    ; I = iniciar/reanudar, P = pausar, R = reiniciar, V = volver al menú,
+    ; X = cancelar alarma activa si existe.
     CMP AL, 'I'
     JE chrono_start
     CMP AL, 'P'
@@ -251,6 +461,8 @@ chrono_loop:
     JE chrono_reset
     CMP AL, 'V'
     JE menu_select_mode
+    CMP AL, 'X'
+    JE cancel_alarm_from_menu
     JMP chrono_loop
 
 chrono_start:
@@ -455,6 +667,73 @@ print_byte_decimal:
     POP AX
     RET
 
+; Lee HHMMSS y guarda la hora como BCD para compararla con INT 1Ah/AH=02h.
+; El usuario ingresa seis dígitos; la rutina valida HH/MM/SS. 
+read_alarm_time:
+    MOV DH, 1
+    MOV SI, alarm_msg
+    CALL show_row
+    MOV DH, 2
+    MOV SI, alarm_hora_msg
+    CALL show_row
+    XOR BX, BX
+
+; Lee caracteres de teclado hasta completar 6 dígitos.
+; Si no es un dígito entre 0 y 9, se descarta y se vuelve a pedir.
+alarm_read:
+    CALL read_key
+    CALL upper_case
+    CMP AL, 'X'
+    JE cancel_alarm_and_return_menu
+    CMP AL, '0'
+    JB alarm_read
+    CMP AL, '9'
+    JA alarm_read
+    CMP BL, 6
+    JNB alarm_read
+
+    CALL putchar
+    SUB AL, '0'
+    MOV [alarm_digits + BX], AL
+    INC BL
+    CMP BL, 6
+    JB alarm_read
+
+    ; HH debe estar entre 00 y 23; MM y SS entre 00 y 59.
+    ; Se valida primero la hora y luego los minutos/segundos.
+    CMP byte [alarm_digits], 2
+    JA alarm_invalid
+    JNE alarm_check_minutes
+    CMP byte [alarm_digits + 1], 3
+    JA alarm_invalid
+
+alarm_check_minutes:
+    CMP byte [alarm_digits + 2], 5
+    JA alarm_invalid
+    CMP byte [alarm_digits + 4], 5
+    JA alarm_invalid
+
+    ; Arma el valor final en formato BCD: HH, MM y SS.
+    MOV AL, [alarm_digits]
+    SHL AL, 4
+    OR AL, [alarm_digits + 1]
+    MOV [alarm_hour], AL
+    MOV AL, [alarm_digits + 2]
+    SHL AL, 4
+    OR AL, [alarm_digits + 3]
+    MOV [alarm_minute], AL
+    MOV AL, [alarm_digits + 4]
+    SHL AL, 4
+    OR AL, [alarm_digits + 5]
+    MOV [alarm_second], AL
+    RET
+
+alarm_invalid:
+    MOV DH, 4
+    MOV SI, alarm_invalid_msg
+    CALL show_row
+    JMP read_alarm_time
+
 ; Bucle que actualiza la hora cada vez que cambia el segundo
 ; Usa INT 1Ah / AH=02h para leer la hora del RTC
 ; CH = horas, CL = minutos, DH = segundos (formato BCD)
@@ -499,14 +778,20 @@ check_for_v:
 
     CMP AL, 'V'
     JE menu_select_mode
+    CMP AL, 'X'
+    JE cancel_alarm_from_menu
 
-    JMP print_time_update ; Si no es V, sigue el reloj
+    JMP print_time_update ; Si no es V ni X, sigue el reloj
 
 ;Mensajes para mostrar en pantalla
 os_boot_msg: DB "meliOS is working...", 0x0D, 0x0A, 0 
 menu_msg: DB 0x0D, 0x0A, "Seleccione modo: A=Alarma  R=Reloj  C=Cronometro", 0x0D, 0x0A, 0
 invalid_msg: DB 0x0D, 0x0A, "Opcion invalida. Presione A, R, C o V.", 0x0D, 0x0A, 0
-alarm_msg: DB 0x0D, 0x0A, "Modo alarma activado, presione V para volver al menu", 0x0D, 0x0A, 0
+alarm_msg: DB "Modo alarma: presione X para cancelar.", 0
+alarm_hora_msg: DB "Hora de alarma (HHMMSS): ", 0
+alarm_invalid_msg: DB "Hora invalida. Use un valor entre 000000 y 235959.", 0
+alarm_set_msg: DB "Alarma configurada. Presione V para volver al menu.", 0
+alarm_ring_msg: DB "*** ALARMA ACTIVADA, presione X para cancelar ***", 0
 clock_msg: DB 0x0D, 0x0A, "Modo reloj activado, presione V para volver al menu", 0x0D, 0x0A, 0
 
 chrono_msg: DB "Modo cronometro", 0
@@ -514,6 +799,15 @@ chrono_controls_msg: DB "I=Iniciar/Reanudar  P=Pausar  R=Reiniciar  V=Volver", 0
 chrono_time_msg: DB "Tiempo: ", 0
 hora_msg: DB "Hora actual: ", 0 ; Texto para la hora
 new_line: DB 0x0D, 0x0A, 0 ; Salto de línea
+
+alarm_triggered: DB 0
+alarm_active: DB 0
+old_offset: DW 0
+old_segment: DW 0
+alarm_hour: DB 0
+alarm_minute: DB 0
+alarm_second: DB 0
+alarm_digits: TIMES 6 DB 0
 
 chrono_running: DB 0
 chrono_start_low: DW 0
