@@ -207,6 +207,20 @@ cancel_alarm_from_menu:
     CALL cancel_alarm
     JMP menu_wait_key
 
+switch_clock_chrono:
+    CMP BYTE [current_mode], 2
+    JE switch_to_chrono
+    CMP BYTE [current_mode], 3
+    JE switch_to_clock
+    JMP mode_clock
+
+switch_to_chrono:
+    JMP mode_chronometer
+
+switch_to_clock:
+    CALL clear_chrono_line
+    JMP mode_clock
+
 ; Modo alarma
 ; Pide la hora HHMMSS, la arma en el RTC y deja la alarma activa 
 mode_alarm:
@@ -251,6 +265,8 @@ mode_alarm_wait_exit:
     JE alarm_exit_to_menu
     CMP AL, 'X' ; X => cancelar la alarma, sin volver al menú
     JE alarm_cancel_only
+    CMP AL, 'S' ; S => alternar reloj/cronómetro
+    JE switch_clock_chrono
     JMP mode_alarm_wait_exit
 
 alarm_cancel_only:
@@ -296,6 +312,18 @@ clear_alarm_line:
     MOV DL, 0 ; columna 0
     CALL set_cursor ; ubica cursor en la línea del mensaje
     CALL clear_line ; limpia la fila completa para ocultar la alarma
+    POP DX
+    POP AX
+    RET
+
+; Limpia la línea donde se muestra el tiempo del cronómetro.
+clear_chrono_line:
+    PUSH AX
+    PUSH DX
+    MOV DH, 4 ; fila 4 = línea del tiempo del cronómetro
+    MOV DL, 0 ; columna 0
+    CALL set_cursor
+    CALL clear_line
     POP DX
     POP AX
     RET
@@ -489,6 +517,8 @@ chrono_loop:
     JE menu_select_mode
     CMP AL, 'X'
     JE cancel_alarm_from_menu
+    CMP AL, 'S'
+    JE switch_clock_chrono
     JMP chrono_loop
 
 chrono_start:
@@ -816,8 +846,10 @@ check_for_v:
     JE menu_select_mode
     CMP AL, 'X'
     JE cancel_alarm_from_menu
+    CMP AL, 'S'
+    JE switch_clock_chrono
 
-    JMP print_time_update ; Si no es V ni X, sigue el reloj
+    JMP print_time_update ; Si no es V ni X ni S ni Z, sigue el reloj
 
 ;Mensajes para mostrar en pantalla
 os_boot_msg: DB "meliOS is working...", 0x0D, 0x0A, 0 
