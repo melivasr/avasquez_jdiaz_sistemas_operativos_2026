@@ -119,6 +119,8 @@ modo_reloj_loop:
     call read_key ; devuelve ascii en ax
     cmp ax, 'v' 
     je menu
+    cmp ax, 'w'
+    je modo_cron
 
     ; Revisar el tiempo y comparar si cambia
     call get_time
@@ -143,17 +145,24 @@ modo_cron_loop:
     cmp ax, 's'
     je start_cron
 
+    cmp ax, 'c'
+    je continue_cron
+
     cmp ax, 'v'
     je menu
+
+    cmp ax, 'w'
+    je modo_reloj
 
     jmp modo_cron_loop
 ;
 start_cron:
+    mov qword [rel elapsed_seconds], 0 ; limpiarlo
+
+continue_cron:
     call clear 
     lea rcx, [rel in_cron_msg]
     call print
-
-    mov qword [rel elapsed_seconds], 0 ; limpiarlo
 
     call set_timer_event
 
@@ -219,17 +228,19 @@ timer_happened:
     mov [rel cron_array+14], ah
 
     jmp in_cron_loop
-
+;
 keyboard_ocurred:
     call read_key ; devuelve ascii en ax
     cmp ax, 'v' 
     je menu
     cmp ax, 'p'
     je pausa
+    cmp ax, 'w'
+    je modo_reloj
     cmp ax, 'r'
     je reiniciar
     jmp in_cron_loop
-
+;
 pausa:
     call clear 
 
@@ -238,19 +249,21 @@ pausa:
 
     lea rcx, [rel cron_array]
     call print
-
+;
 pausa_loop:
 
     call read_key
     cmp ax, 'v' 
     je menu
+    cmp ax, 'w'
+    je modo_reloj 
     cmp ax, 'c' ; continuar
     je in_cron_loop
     cmp ax, 'r'
     je reiniciar
 
     jmp pausa_loop
-
+;
 reiniciar:
     mov byte [rel cron_array], '0'
     mov byte [rel cron_array+2], '0'
@@ -484,23 +497,23 @@ wel_msg:
     dw 13, 10, 0
 
 menu_msg:
-    utf16str "Opciones: R = Reloj, C = Cronometro, A = Alarma, E = Exit to boot, V = Volver al menu"
+    utf16str "Opciones: R = Reloj, C = Cronometro, A = Alarma, E = Exit to boot"
     dw 13, 10, 0
 
 reloj_msg:
-    utf16str "Bienvenido al Modo Reloj! Opciones: V = Volver al menu"
+    utf16str "Bienvenido al Modo Reloj! Opciones: V = Volver al menu, W = Cambiar de modo"
     dw 13, 10, 0
 
 cron_msg:
-    utf16str "Bienvenido al Modo Cronometro! Opciones: S = Iniciar, V = Volver al menu"
+    utf16str "Bienvenido al Modo Cronometro! Opciones: S = Iniciar (en 0), C = Continuar, V = Volver al menu, W = Cambiar de modo"
     dw 13, 10, 0
 
 in_cron_msg:
-    utf16str "Cronometro en curso!: Opciones: P = Pausar, R = Reiniciar, V = Volver al menu"
+    utf16str "Cronometro en curso!: Opciones: P = Pausar, R = Reiniciar, V = Volver al menu, W = Cambiar de modo"
     dw 13, 10, 0
 
 pausa_msg:
-    utf16str "Cronometro en pausa!: Opciones: C = Continuar, R = Reiniciar, V = Volver al menu"
+    utf16str "Cronometro en pausa!: Opciones: C = Continuar, R = Reiniciar, V = Volver al menu, W = Cambiar de modo"
     dw 13, 10, 0
 
 err_msg:
