@@ -247,14 +247,18 @@ mode_alarm_wait_exit:
     MOV AH, 00h ; AH=00h => lee la tecla del teclado
     INT 16h ; AL = ASCII de la tecla presionada
     CALL upper_case ; convierte a mayúscula si era minúscula
-    CMP AL, 'V' ; V => salir del modo alarma y volver al menú
-    JE menu_select_mode
-    CMP AL, 'X' ; X => cancelar alarma activa y volver al menú
-    JE cancel_alarm_and_return_menu
+    CMP AL, 'V' ; V => volver al menú
+    JE alarm_exit_to_menu
+    CMP AL, 'X' ; X => cancelar la alarma, sin volver al menú
+    JE alarm_cancel_only
     JMP mode_alarm_wait_exit
 
-cancel_alarm_and_return_menu:
+alarm_cancel_only:
     CALL cancel_alarm
+    JMP mode_alarm_wait_exit
+
+alarm_exit_to_menu:
+    CALL clear_alarm_line
     JMP menu_select_mode
 
 mode_alarm_exit:
@@ -327,8 +331,10 @@ alarm_notify_wait:
     MOV AH, 00h ; AH=00h => lee la tecla presionada
     INT 16h ; AL = código ASCII de la tecla
     CALL upper_case ; normaliza a mayúscula
+    CMP AL, 'V' ; V => volver al menú
+    JE alarm_exit_to_menu
     CMP AL, 'X' ; X => cancelar la alarma actual
-    JNE alarm_notify_wait ; si no es X, sigue esperando
+    JNE alarm_notify_wait
 
     ; Borra el mensaje de alarma antes de salir para que desaparezca de pantalla.
     CALL clear_alarm_line
@@ -707,8 +713,10 @@ read_alarm_time:
 alarm_read:
     CALL read_key
     CALL upper_case
+    CMP AL, 'V'
+    JE alarm_config_exit_to_menu
     CMP AL, 'X'
-    JE cancel_alarm_and_return_menu
+    JE alarm_cancel_only
     CMP AL, '0'
     JB alarm_read
     CMP AL, '9'
@@ -757,6 +765,9 @@ alarm_invalid:
     MOV SI, alarm_invalid_msg
     CALL show_row
     JMP read_alarm_time
+
+alarm_config_exit_to_menu:
+    JMP menu_select_mode
 
 ; Bucle que actualiza la hora cada vez que cambia el segundo
 ; Usa INT 1Ah / AH=02h para leer la hora del RTC
@@ -812,7 +823,7 @@ check_for_v:
 os_boot_msg: DB "meliOS is working...", 0x0D, 0x0A, 0 
 menu_msg: DB 0x0D, 0x0A, "Seleccione modo: A=Alarma  R=Reloj  C=Cronometro", 0x0D, 0x0A, 0
 invalid_msg: DB 0x0D, 0x0A, "Opcion invalida. Presione A, R, C o V.", 0x0D, 0x0A, 0
-alarm_msg: DB "Modo alarma: presione X para cancelar.", 0
+alarm_msg: DB "Modo alarma: presione X para cancelar o V para volver al menu", 0
 alarm_hora_msg: DB "Hora de alarma (HHMMSS): ", 0
 alarm_invalid_msg: DB "Hora invalida. Use un valor entre 000000 y 235959.", 0
 alarm_set_msg: DB "Alarma configurada. Presione V para volver al menu.", 0
