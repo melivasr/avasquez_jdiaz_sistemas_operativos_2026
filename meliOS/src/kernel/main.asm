@@ -189,10 +189,12 @@ menu_wait_key:
 
     CMP AL, 'A'
     JE mode_alarm
-    CMP AL, 'R'
+    CMP AL, 'H'
     JE mode_clock
     CMP AL, 'C'
     JE mode_chronometer
+    CMP AL, 'R'
+    JE reset_chrono_global
     CMP AL, 'V'
     JE menu_select_mode
     CMP AL, 'X'
@@ -265,6 +267,8 @@ mode_alarm_wait_exit:
     JE alarm_exit_to_menu
     CMP AL, 'X' ; X => cancelar la alarma, sin volver al menú
     JE alarm_cancel_only
+    CMP AL, 'R' ; R => reiniciar el cronómetro sin cambiar de modo
+    JE reset_chrono_global
     CMP AL, 'S' ; S => alternar reloj/cronómetro
     JE switch_clock_chrono
     JMP mode_alarm_wait_exit
@@ -362,8 +366,12 @@ alarm_notify_wait:
     CMP AL, 'V' ; V => volver al menú
     JE alarm_exit_to_menu
     CMP AL, 'X' ; X => cancelar la alarma actual
-    JNE alarm_notify_wait
+    JE alarm_notify_cancel
+    CMP AL, 'R' ; R => reiniciar cronómetro 
+    JE reset_chrono_global
+    JMP alarm_notify_wait
 
+alarm_notify_cancel:
     ; Borra el mensaje de alarma antes de salir para que desaparezca de pantalla.
     CALL clear_alarm_line
     CALL cancel_alarm ; desactiva la alarma y restaura el vector original
@@ -459,6 +467,9 @@ mode_clock:
     MOV DH, 1 ;Posicion donde se imprime
     MOV SI, clock_msg
     CALL show_row
+    MOV DH, 2
+    MOV SI, clock_msg2
+    CALL show_row
     CALL print_time_loop
 
 ; Modo chronometro
@@ -512,7 +523,7 @@ chrono_loop:
     CMP AL, 'P'
     JE chrono_pause
     CMP AL, 'R'
-    JE chrono_reset
+    JE reset_chrono_global
     CMP AL, 'V'
     JE menu_select_mode
     CMP AL, 'X'
@@ -557,26 +568,26 @@ chrono_pause:
     MOV [chrono_last_seconds], AX
     JMP chrono_loop
 
-chrono_reset:
-    ; Reinicia el cronómetro a cero.
-    ; Primero borramos el tiempo acumulado guardado en chrono_elapsed_low/high.
+reset_chrono_global:
+    ; Reinicia el cronómetro a cero y lo vuelve a arrancar desde el tiempo actual.
     XOR AX, AX
     MOV [chrono_elapsed_low], AX
     MOV [chrono_elapsed_high], AX
-
-    ; Se fuerza la actualización de la pantalla para que el cronómetro muestre 00:00:00
-    ; aunque el cronómetro se estaba mostrando en otro valor antes del reinicio.
+    MOV [chrono_start_low], AX
+    MOV [chrono_start_high], AX
+    MOV [chrono_running], AL
     MOV AX, 0FFFFh
     MOV [chrono_last_seconds], AX
-
-    ; Si el cronómetro estaba corriendo, se redefine el punto de inicio para que
-    ; el tiempo nuevo comience a contar desde este instante exacto.
-    MOV AL, [chrono_running]
-    OR AL, AL
-    JE chrono_loop
     CALL get_bios_ticks
     MOV [chrono_start_high], CX
     MOV [chrono_start_low], DX
+    MOV AL, 1
+    MOV [chrono_running], AL
+    RET
+
+chrono_reset:
+    ; Reinicio global del cronometro.
+    CALL reset_chrono_global
     JMP chrono_loop
 
 ;Si el usuario presiona V, vuelve al menu
@@ -846,15 +857,17 @@ check_for_v:
     JE menu_select_mode
     CMP AL, 'X'
     JE cancel_alarm_from_menu
+    CMP AL, 'R'
+    JE reset_chrono_global
     CMP AL, 'S'
     JE switch_clock_chrono
 
-    JMP print_time_update ; Si no es V ni X ni S ni Z, sigue el reloj
+    JMP print_time_update ; Si no es V ni X ni R ni S, sigue el reloj
 
 ;Mensajes para mostrar en pantalla
 os_boot_msg: DB "meliOS is working...", 0x0D, 0x0A, 0 
-menu_msg: DB 0x0D, 0x0A, "Seleccione modo: A=Alarma  R=Reloj  C=Cronometro", 0x0D, 0x0A, 0
-invalid_msg: DB 0x0D, 0x0A, "Opcion invalida. Presione A, R, C o V.", 0x0D, 0x0A, 0
+menu_msg: DB 0x0D, 0x0A, "Seleccione modo: A=Alarma  H=Hora Actual  C=Cronometro", 0x0D, 0x0A, 0
+invalid_msg: DB 0x0D, 0x0A, "Opcion invalida. Presione A=Alarma, H=Hora Actual, C=Cronometro o V.", 0x0D, 0x0A, 0
 alarm_msg: DB "Modo alarma: presione X para cancelar o V para volver al menu", 0
 alarm_hora_msg: DB "Hora de alarma (HHMMSS): ", 0
 alarm_invalid_msg: DB "Hora invalida. Use un valor entre 000000 y 235959.", 0
@@ -866,6 +879,7 @@ chrono_msg: DB "Modo cronometro", 0
 chrono_controls_msg: DB "I=Iniciar/Reanudar  P=Pausar  R=Reiniciar  V=Volver", 0
 chrono_time_msg: DB "Tiempo: ", 0
 hora_msg: DB "Hora actual: ", 0 ; Texto para la hora
+clock_msg2: DB "Presione S para cambiar entre reloj y cronometro. V para volver al menu", 0 ; Texto para la hora
 new_line: DB 0x0D, 0x0A, 0 ; Salto de línea
 
 current_mode: DB 0
