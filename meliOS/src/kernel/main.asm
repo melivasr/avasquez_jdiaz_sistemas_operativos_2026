@@ -168,6 +168,7 @@ upper_done:
 
 ; Muestra el menú y espera la opción elegida
 menu_select_mode:
+    MOV BYTE [current_mode], 0
     CALL clear_screen
     MOV DH, 0 ;Posicion en pantalla
     MOV SI, menu_msg
@@ -176,7 +177,14 @@ menu_select_mode:
 ; Opciones posibles a elegir
 menu_wait_key:
     CALL check_alarm_state
-    CALL read_key
+    CALL chrono_update
+
+    MOV AH, 01h ; Consulta si hay una tecla sin bloquear la cuenta del cronómetro.
+    INT 16h
+    JZ menu_wait_key
+
+    MOV AH, 00h
+    INT 16h
     CALL upper_case
 
     CMP AL, 'A'
@@ -202,6 +210,7 @@ cancel_alarm_from_menu:
 ; Modo alarma
 ; Pide la hora HHMMSS, la arma en el RTC y deja la alarma activa 
 mode_alarm:
+    MOV BYTE [current_mode], 1
     CALL read_alarm_time
     JC mode_alarm_exit
 
@@ -230,6 +239,7 @@ mode_alarm:
     CALL show_row
 
 mode_alarm_wait_exit:
+    CALL chrono_update
     MOV AH, 01h ; AH=01h => consulta si hay tecla en buffer
     INT 16h ; ZF=1 si no hay tecla
     JZ mode_alarm_wait_exit ; si no hay nada, sigue esperando
@@ -309,6 +319,7 @@ alarm_notify:
     CALL show_row ; imprime el mensaje en pantalla
 
 alarm_notify_wait:
+    CALL chrono_update
     MOV AH, 01h ; AH=01h => revisa si hay tecla en el buffer
     INT 16h ; ZF=1 si no hay tecla
     JZ alarm_notify_wait ; espera sin bloquear
@@ -410,6 +421,7 @@ alarm_handler:
 
 ; Modo reloj
 mode_clock:
+    MOV BYTE [current_mode], 2
     MOV DH, 1 ;Posicion donde se imprime
     MOV SI, clock_msg
     CALL show_row
@@ -417,14 +429,22 @@ mode_clock:
 
 ; Modo chronometro
 mode_chronometer:
-    ; Inicializa el cronómetro en estado pausado y con tiempo acumulado = 0.
-    ; chrono_running = 0  -> cronometro detenido
-    ; chrono_elapsed_low/high = 0 -> tiempo acumulado = 0
+    MOV BYTE [current_mode], 3
+    ; Solo se inicializa la primera vez que entra al cronómetro.
+    ; Si ya existía un estado previo, se conserva para que siga contando.
+    CMP BYTE [chrono_initialized], 1
+    JE chrono_enter_ready
+
     XOR AX, AX
     MOV [chrono_running], AL
     MOV [chrono_elapsed_low], AX
     MOV [chrono_elapsed_high], AX
-    ; Fuerza el primer dibujo del tiempo como 00:00:00.
+    MOV [chrono_start_low], AX
+    MOV [chrono_start_high], AX
+    MOV BYTE [chrono_initialized], 1
+
+chrono_enter_ready:
+    ; Fuerza el primer dibujo del tiempo como 00:00:00 cuando se entra por primera vez.
     MOV AX, 0FFFFh
     MOV [chrono_last_seconds], AX
     ; Muestra el título y las instrucciones del cronómetro.
@@ -620,7 +640,11 @@ chrono_convert_values:
     MOV [chrono_minutes], AL
     MOV [chrono_seconds], DL
 
-    ;Muestra/ imprime HH:MM:SS.
+    ; Solo se imprime si el usuario está en el modo cronómetro.
+    ; El cronómetro continúa corriendo aunque el usuario cambie de modo.
+    CMP BYTE [current_mode], 3
+    JNE chrono_update_done
+
     MOV DH, 4
     MOV SI, chrono_time_msg
     CALL show_row
@@ -741,6 +765,7 @@ print_time_loop:
     MOV BL, 0xFF 
 
 print_time_update:
+    CALL chrono_update
     MOV AH, 02h
     INT 1Ah ; CH=horas, CL=minutos, DH=segundos (BCD)
     MOV BH, DH ; Guarda los segundos en BH antes de cambiar DH por la fila
@@ -800,6 +825,8 @@ chrono_time_msg: DB "Tiempo: ", 0
 hora_msg: DB "Hora actual: ", 0 ; Texto para la hora
 new_line: DB 0x0D, 0x0A, 0 ; Salto de línea
 
+current_mode: DB 0
+chrono_initialized: DB 0
 alarm_triggered: DB 0
 alarm_active: DB 0
 old_offset: DW 0
