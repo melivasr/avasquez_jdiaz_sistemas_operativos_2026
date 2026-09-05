@@ -38,7 +38,12 @@ EFI_WAIT_FOR_EVENT_off equ 0x60; offset desde BootServices
 ; ============================================================
 
 kernel_main:
+    push rbp
+    mov rbp, rsp
+    and rsp, -16      ; fuerza RSP a múltiplo de 16, 
+    ; sin importar cómo se haya llamado el firmware/bootloader
     mov [rel runtime_addr], rcx
+
     mov [rel conout_addr], rdx
     mov [rel conin_addr], r8
     mov [rel bootServices_addr], r9
@@ -47,6 +52,20 @@ kernel_main:
     lea rax, [rel efi_events] ; indice 0
     mov r8, [r8 + 0x10] ; WaitForKey en R8
     mov [rax], r8 ; guardar WaitForKey en efi_events[0]
+
+    call create_timer ;
+    
+    test rax, rax
+    jnz error
+
+    cmp qword [rel TimerEvent], 0
+    je error
+
+    ; Preparar EFI_EVENTS
+    lea rax, [rel efi_events] ; indice 0
+    add rax, 0x08 ; moverse al indice 1
+    mov r8, [rel TimerEvent]
+    mov [rax], r8 ; guardar WaitForKey en efi_events[1]
     
     ; Boot
     lea rcx, [rel msg]
@@ -117,47 +136,39 @@ modo_cron:
     call clear
     lea rcx, [rel cron_msg]
     call print
-
-    ; WAIT FOR EVENT -> Esperar Evento Key
-    mov rax, [rel bootServices_addr]
-    mov rax, [rax + EFI_WAIT_FOR_EVENT_off] ; call
-    mov rcx, 1 ; solo espera Key
-    lea rdx, [rel efi_events]
-    lea r8, [rel efi_events_index]
-
-    ; shadow space 
-    sub rsp, 32
-    call rax ; Wait for event retornara cuando ocurra un evento
-    add rsp, 32
-
+;
+modo_cron_loop:
     call read_key
 
     cmp ax, 's'
     je start_cron
 
-    jmp modo_cron
+    cmp ax, 'v'
+    je menu
+
+    jmp modo_cron_loop
 ;
 start_cron:
     call clear 
-    lea rcx, [rel cron_msg]
+    lea rcx, [rel in_cron_msg]
     call print
 
-    mov qword [elapsed_seconds], 0 ; limpiarlo
-    call create_timer ; continua a set_timer
+    mov qword [rel elapsed_seconds], 0 ; limpiarlo
 
-    ; Preparar EFI_EVENTS
-    lea rax, [rel efi_events] ; indice 0
-    add rax, 0x08 ; moverse al indice 1
-    mov r8, [rel TimerEvent]
-    mov [rax], r8 ; guardar WaitForKey en efi_events[1]
+    call set_timer_event
 
     lea rcx, [rel cron_array]
     call print
 ;
-modo_cron_loop:
+in_cron_loop:
     call clear 
-    lea rcx, [rel cron_msg]
+
+    lea rcx, [rel in_cron_msg]
     call print
+
+    lea rcx, [rel cron_array]
+    call print
+ 
     ; WAIT FOR EVENT -> Esperar Evento Key o Timer
     mov rax, [rel bootServices_addr]
     mov rax, [rax + EFI_WAIT_FOR_EVENT_off]
@@ -165,16 +176,25 @@ modo_cron_loop:
     lea rdx, [rel efi_events]
     lea r8, [rel efi_events_index]
 
-    sub rsp, 32
+    sub rsp, 40
     call rax
-    add rsp, 32
+    add rsp, 40
 
-    cmp qword [efi_events_index], 0 ; ver si es Key
-    je keyboard_ocurred ; si no es igual, es timer
+    cmp qword [rel efi_events_index], 0
+    je keyboard_ocurred
 
-    inc qword [elapsed_seconds] ; llevar cuenta de segundos
+    cmp qword [rel efi_events_index], 1
+    je timer_happened
+
+    jmp in_cron_loop
+
+    
+;
+timer_happened:
+    mov byte [rel debug_array], 'T'
+    inc qword [rel elapsed_seconds] ; llevar cuenta de segundos
     ; pasar segundos a horas y tiempo
-    mov rax, [elapsed_seconds] ; dividendo
+    mov rax, [rel elapsed_seconds] ; dividendo
     xor rdx, rdx ; limpiar parte alta: RDX:RAX
     mov rcx, 3600
     div rcx ; cociente en RAX, residuo en RDX
@@ -198,8 +218,7 @@ modo_cron_loop:
     mov [rel cron_array+12], al
     mov [rel cron_array+14], ah
 
-    lea rcx, [rel cron_array]
-    call print
+    jmp in_cron_loop
 
 keyboard_ocurred:
     call read_key ; devuelve ascii en ax
@@ -207,14 +226,40 @@ keyboard_ocurred:
     je menu
     cmp ax, 'p'
     je pausa
-    jmp modo_cron_loop
+    cmp ax, 'r'
+    je reiniciar
+    jmp in_cron_loop
 
 pausa:
+    call clear 
+
+    lea rcx, [rel pausa_msg]
+    call print
+
+    lea rcx, [rel cron_array]
+    call print
+
+pausa_loop:
+
     call read_key
     cmp ax, 'v' 
     je menu
     cmp ax, 'c' ; continuar
-    je modo_cron_loop
+    je in_cron_loop
+    cmp ax, 'r'
+    je reiniciar
+
+    jmp pausa_loop
+
+reiniciar:
+    mov byte [rel cron_array], '0'
+    mov byte [rel cron_array+2], '0'
+    mov byte [rel cron_array+6], '0'
+    mov byte [rel cron_array+8], '0'
+    mov byte [rel cron_array+12], '0'
+    mov byte [rel cron_array+14], '0'
+    mov qword [rel elapsed_seconds], 0
+    jmp in_cron_loop
 
 ;
 ; ========================================================
@@ -232,7 +277,9 @@ read_key:
 
     lea rdx, [rel key_pointer]
 
+    sub rsp, 40
     call rax
+    add rsp, 40
 
     mov ax, [rel key_pointer + 2] ; devolver ASCII es ax
     ret
@@ -252,9 +299,9 @@ get_time:
     mov rax, [rax + EFI_GET_TIME_off]
     lea rcx, [rel time_pointer]
     xor edx, edx
-    sub rsp, 32
+    sub rsp, 40
     call rax
-    add rsp, 32
+    add rsp, 40
 
     ; comprobar
     test rax, rax
@@ -336,11 +383,11 @@ print:
     mov rax, [rcx + EFI_OUTPUTSTRING_off] ; call
 
     ; Shadow space
-    sub rsp, 32
+    sub rsp, 40
     ; ConOut->OutputString(ConOut, msg)
     call rax
     ; Restaurar stack
-    add rsp, 32
+    add rsp, 40
 
     ret
 
@@ -356,11 +403,11 @@ clear:
     mov rax, [rcx + EFI_CLEAR_off] ; call
 
     ; Shadow space
-    sub rsp, 32
+    sub rsp, 40
     ; ConOut->ClearScreen(ConOut)
     call rax
     ; Restaurar stack
-    add rsp, 32
+    add rsp, 40
 
     ret
 
@@ -374,7 +421,7 @@ create_timer:
     mov rax, [rel bootServices_addr]
     mov rax, [rax + EFI_CREATE_EVENT_off]  
     ; Reservar Shadow space
-    sub rsp, 40h ; reservar 64 bytes en stack por comodidad
+    sub rsp, 40 ; reservar 40+8 bytes en stack 
     mov rcx, 0x80000000 ; EVT_TIMER
     mov edx, 0x04 ; Nivel de prioridad de una app normal
     xor r8d, r8d ; Sin callback
@@ -383,7 +430,9 @@ create_timer:
     lea r10, [rel TimerEvent] ; puntero al evento
     mov [rsp + 32], r10 ; 5to argumento se carga en stack
     call rax
-    add rsp, 64 ; restaurar stack
+    add rsp, 40 ; restaurar stack
+
+    ret
 
 ;
 ; ========================================================
@@ -397,9 +446,31 @@ set_timer_event:
     mov edx, 1 ; Tipo = TimerPeriodic
     mov r8, 10000000 ; 1 segundo 
 
+    ; shadow space
+    sub rsp, 40
     call rax
+    add rsp, 40
     ret
 ;
+; ========================================================
+; CANCELAR TIMER -> Usa Set Timer
+; ========================================================
+cancel_timer:
+    mov rax, [rel bootServices_addr]
+    mov rax, [rax + EFI_SET_TIMER_off]
+    mov rcx, [rel TimerEvent]
+    mov edx, 0          ; TimerCancel
+    xor r8, r8          ; TriggerTime ignorado en cancel
+
+    sub rsp, 40
+    call rax
+    add rsp, 40
+    ret
+;
+error:
+    mov rcx, [rel err_msg]
+    call print
+    jmp error
 ; ============================================================
 ; VARIABLES
 ; ============================================================
@@ -421,7 +492,15 @@ reloj_msg:
     dw 13, 10, 0
 
 cron_msg:
-    utf16str "Bienvenido al Modo Cronometro! Opciones: V = Volver al menu"
+    utf16str "Bienvenido al Modo Cronometro! Opciones: S = Iniciar, V = Volver al menu"
+    dw 13, 10, 0
+
+in_cron_msg:
+    utf16str "Cronometro en curso!: Opciones: P = Pausar, R = Reiniciar, V = Volver al menu"
+    dw 13, 10, 0
+
+pausa_msg:
+    utf16str "Cronometro en pausa!: Opciones: C = Continuar, R = Reiniciar, V = Volver al menu"
     dw 13, 10, 0
 
 err_msg:
@@ -448,6 +527,11 @@ guardar_seg: dw 0
 cron_array:
     ;   0,  2,  4,  6,  8, 10, 12, 14
     dw '0','0',':','0','0',':','0','0'
+    dw 13, 10, 0
+
+debug_array:
+    ;   0,  2,  4,  6,  8, 10, 12, 14
+    dw '2'
     dw 13, 10, 0
 
 elapsed_seconds: dq 0
