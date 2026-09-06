@@ -25,6 +25,7 @@ global kernel_main
 
 EFI_OUTPUTSTRING_off equ 0x8 ; offset del protocolo de OutputString desde ConOut
 EFI_CLEAR_off equ 0x30 ; offset del protocolo de clear screen desde ConOut
+EFI_SET_ATTRIBUTE_off equ 0x28 ; ; offset del protocolo para cambiar color desde ConOut
 EFI_READ_KEY_PROTOCOL_off equ 0x8 ; offset del protocolo desde ConIn
 EFI_GET_TIME_off equ 0x18 ; offset del protocolo desde Runtime
 
@@ -76,6 +77,7 @@ kernel_main:
 ;
 menu:
     ; Welcome
+    call revisar_alarma
     call clear
     lea rcx, [rel wel_msg]
     call print
@@ -113,6 +115,7 @@ halt_loop:
 ; ========================================================
 
 modo_reloj:
+    call revisar_alarma
     call clear
     lea rcx, [rel reloj_msg]
     call print
@@ -121,7 +124,7 @@ modo_reloj:
     lea rcx, [rel reloj_array]
     call print
     mov byte [guardar_seg], 0 ; deshabilitar guardar seg
-
+;
 modo_reloj_loop:
     ; Volver al menú
     call read_key ; devuelve ascii en ax
@@ -145,6 +148,7 @@ modo_reloj_loop:
 ; ========================================================
 
 modo_cron:
+    call revisar_alarma
     call clear
     lea rcx, [rel cron_msg]
     call print
@@ -171,8 +175,9 @@ modo_cron_loop:
 ;
 start_cron:
     mov qword [rel elapsed_seconds], 0 ; limpiarlo
-
+;
 continue_cron:
+    call revisar_alarma
     call clear 
     lea rcx, [rel in_cron_msg]
     call print
@@ -181,6 +186,7 @@ continue_cron:
     call print
 ;
 in_cron_loop:
+    call revisar_alarma
     call clear 
 
     lea rcx, [rel in_cron_msg]
@@ -255,6 +261,7 @@ keyboard_ocurred:
     jmp in_cron_loop
 ;
 pausa:
+    call revisar_alarma
     call clear 
 
     lea rcx, [rel pausa_msg]
@@ -291,32 +298,153 @@ reiniciar:
 
 ;
 ; ========================================================
-; Modo_Cronometro
+; Modo_Alarma
 ; ========================================================
 
 modo_alarma:
+    call revisar_alarma
     call clear
     lea rcx, [rel alarma_msg]
-    call prints
+    call print
+;
+modo_alarma_loop:
+    call read_key
+    cmp ax, 'i'
+    je ingresar_alarma
+    cmp ax, 'd'
+    je desactivar_alarma
+;
+ingresar_alarma:
+    call read_alarm
+    mov [rel alarm_activated], 1 ; alarma activa
+    mov rcx, [rel alarm_success_msg]
+    call print
+    jmp ingresar_alarma_loop
+;
+ingresar_alarma_loop:
+    call read_key
+    cmp ax, 'v'
+    je menu
+;
+desactivar_alarma:
+    mov al, [rel alarm_activated]
+    cmp al, 0
+    je no_alarm ; si no, entonces si hay alarma
+    mov rcx, [rel alarm_erased_msg]
+    call print
+    mov [rel alarm_activated], 0
+    jmp desactivar_alarma_loop
+;
+no_alarm:
+    mov rcx, [rel no_alarm_msg]
+    call print
+    jmp desactivar_alarma_loop
+;
+desactivar_alarma_loop:
+    call read_key
+    cmp ax, 'v'
+    je menu
+;
 
+; ============================================================
+; Revisar Alarma
+; Si alarm_activated = 1, se hace, si no, salta al final
+; Utiliza GetTime(), compara 
+; ============================================================
+
+revisar_alarma:
+    mov al, [rel alarm_activated] 
+    cmp al, 1
+    jne alarm_not_yet
+
+    xor rax, rax ; limpiar
+    mov rax, [rel runtime_addr]
+    mov rax, [rax + EFI_GET_TIME_off] ; obtener get_time
+    lea rcx, [rel time_pointer]
+    xor edx, edx
+    sub rsp, 32
+    call rax
+    add rsp, 32
+
+    ; comprobar
+    test rax, rax
+    jz .alarm_time_ok
+    lea rcx, [rel err_msg]
+    call print
+    ret
+;  
+.alarm_time_ok:
+    ; time_pointer: Y1,Y2, M, D, H, Min, Seg
+
+    movzx ax, byte [rel time_pointer+4]  ; Hour
+    cmp ax, [rel alarm_hour]
+    jne alarm_not_yet
+
+    movzx ax, byte [rel time_pointer+5]  ; Min
+    cmp ax, [rel alarm_minute]
+    jne alarm_not_yet
+
+    ; HACER QUE LA PANTALLA CAMBIE USANDO SET ATRIBUTE
+    call cambiar_color_blanco_rojo
+    ret
+;
+alarm_not_yet:
+    call cambiar_color_normal
+    ret
+;
+
+;
+; ============================================================
+; Cambiar_color_pantalla
+; ============================================================
+
+cambiar_color_blanco_rojo:
+    mov rax, [rel conout_addr]
+    mov rcx, rax ; this
+    mov rax, [rax + EFI_SET_ATTRIBUTE_off]
+    mov rdx, 0x4F    ; blanco sobre rojo
+
+    sub rsp, 32 ; shadow space
+    call rax
+    add rsp, 32
+
+    test rax, rax
+    jnz error
+
+    ret
+;
+cambiar_color_normal:
+    mov rax, [rel conout_addr]
+    mov rcx, rax ; this
+    mov rax, [rax + EFI_SET_ATTRIBUTE_off]
+    mov rdx, 0x0F    ; blanco sobre negro
+
+    sub rsp, 32 ; shadow space
+    call rax
+    add rsp, 32
+
+    test rax, rax
+    jnz error
+
+    ret
+
+;
 ; ============================================================
 ; read_alarm. Usa Read Key
 ;
-; Salida:
+; Salida: (no ascii)
 ;   [alarm_hour]   = hora
 ;   [alarm_minute] = minuto
 ;
 ; Ejemplo:
 ;   14 35<ENTER>
-;
 ; ============================================================
 
 read_alarm:
-
     ; Inicializar
     mov word [current_number], 0
-    mov byte [input_state], 0 ; verifica si estamos en modo hora, modo min u otro
-
+    mov byte [input_state], 0 ; Establecer modo hora
+;
 .read_key:
 
     call read_key
@@ -349,6 +477,7 @@ read_alarm:
     jmp .read_key
 
 
+;
 ; ============================================================
 ; SPACE
 ; ============================================================
@@ -378,6 +507,7 @@ read_alarm:
     jmp .read_key
 
 
+;
 ; ============================================================
 ; ENTER
 ; ============================================================
@@ -399,13 +529,14 @@ read_alarm:
     ret
 
 
+;
 ; ============================================================
 ; Entrada inválida
 ; ============================================================
 
 .invalid:
 
-    mov rcx, [rel alarma_err]
+    mov rcx, [rel alarm_err_msg]
     call print ; "Hora invalida"
 
     mov word [current_number], 0
@@ -668,14 +799,29 @@ pausa_msg:
     dw 13, 10, 0
 ;
 alarma_msg:
-    utf16str "Bienvenido al Modo Alarma. Ingrese la hora"
+    utf16str "Bienvenido al Modo Alarma. Opciones: I = Ingresar alarma, D = Desactivar alarma actual, V = Volver al menu"
     dw 13, 10, 0
-
 ;
-alarma_err_msg:
+poner_alarma_msg:
+    utf16str "Ingrese la alarma: HH<Space>MM<Enter>"
+    dw 13, 10, 0
+;
+alarm_success_msg:
+    utf16str "Alarma ingresada exitosamente! Opciones: V = Volver al menú"
+    dw 13, 10, 0
+;
+alarm_err_msg:
     utf16str "HH/MM inválido. Prueba con HH<Space>MM<Enter>"
     dw 13, 10, 0
 ;
+alarm_erased_msg:
+    utf16str "Alarma Elimindada! Presione V para volver al menu"
+    dw 13, 10, 0
+;
+no_alarm_msg:
+    utf16str "No hay alarma configurada! Presione V para volver al menu"
+    dw 13, 10, 0
+; 
 err_msg:
     utf16str "GetTime FALLO"
     dw 13, 10, 0
@@ -718,13 +864,14 @@ efi_events_index: dq 0
 key_pointer: dq 0
 
 ; Para alarma
-alarm_hour      db 0
-alarm_minute    db 0
+alarm_hour:      db 0
+alarm_minute:    db 0
 
-current_number  dw 0
-input_state     db 0        ; 0 = hora, 1 = minutos
+alarm_activated: db 0
+
+current_number:  dw 0
+input_state:    db 0        ; 0 = hora, 1 = minutos
 
 key:
     dw 0                    ; ScanCode
     dw 0                    ; UnicodeChar
-
