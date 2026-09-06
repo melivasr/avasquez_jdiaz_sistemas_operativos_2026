@@ -273,11 +273,9 @@ mode_alarm_wait_exit:
     JE alarm_exit_to_menu
     CMP AL, 'X' ; X => cancelar la alarma, sin volver al menú
     JE alarm_cancel_only
-    CMP AL, 'R' ; R => reiniciar el cronómetro sin cambiar de modo
-    JE alarm_read_reset
-    JMP mode_alarm_wait_exit
-
-not_alarm_reset:
+    CMP AL, 'R'
+    JNE mode_alarm_wait_exit
+    CALL reset_chrono_global
     JMP mode_alarm_wait_exit
 
 alarm_cancel_only:
