@@ -280,6 +280,7 @@ mode_alarm:
     MOV DH, 3
     MOV SI, alarm_set_msg
     CALL show_row
+    JMP menu_select_mode
 
 alarm_cancel_only:
     CALL cancel_alarm
@@ -603,11 +604,17 @@ chrono_loop:
     CMP AL, 'P'
     JE chrono_pause
     CMP AL, 'R'
-    JE reset_chrono_global
+    JNE chrono_check_v
+    CALL reset_chrono_global
+    JMP chrono_loop
+chrono_check_v:
     CMP AL, 'V'
     JE menu_select_mode
     CMP AL, 'X'
-    JE cancel_alarm_from_menu
+    JNE chrono_check_s
+    CALL cancel_alarm
+    JMP chrono_loop
+chrono_check_s:
     CMP AL, 'S'
     JE switch_clock_chrono
     JMP chrono_loop
@@ -931,12 +938,17 @@ check_for_v:
     CMP AL, 'V'
     JE menu_select_mode
     CMP AL, 'X'
-    JE cancel_alarm_from_menu
+    JNE time_check_r
+    CALL cancel_alarm
+    JMP print_time_update
+time_check_r:
     CMP AL, 'R'
-    JE reset_chrono_global
+    JNE time_check_s
+    CALL reset_chrono_global
+    JMP print_time_update
+time_check_s:
     CMP AL, 'S'
     JE switch_clock_chrono
-
     JMP print_time_update ; Si no es V ni X ni R ni S, sigue el reloj
 
 ;Mensajes para mostrar en pantalla
