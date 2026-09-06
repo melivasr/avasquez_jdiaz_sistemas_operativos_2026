@@ -326,54 +326,130 @@ clear_alarm_line:
     POP AX
     RET
 
-cancel_alarm:
-    CMP BYTE [alarm_active], 1 ; solo cancela si la alarma está activa
-    JNE cancel_alarm_done
+; Se llama en cada actualización de tiempo. Si la alarma está sonando,
+; alterna el color de toda la pantalla cada ~medio segundo para crear
+; el efecto de parpadeo.
+alarm_flash_update:
+    CMP BYTE [alarm_triggered], 1 ; Si la alarma ocurrio, no se hace el efecto visual
+    JE alarm_flash ; Entra al parpadeo solo cuando la alarma está activa
+    RET
 
-    CALL clear_alarm_line ; borra el aviso visible
-    MOV BYTE [alarm_active], 0 ; desactiva el flag global
-    MOV BYTE [alarm_triggered], 0 ; limpia disparo previo
+alarm_flash:
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DX
+
+    CALL get_bios_ticks ; como ~18 ticks = 1 segundo, 9 ticks ≈ medio segundo.
+    MOV AX, DX 
+    MOV BX, 9 ; ~9 ticks por cambio de color, aprox. medio segundo
+    XOR DX, DX ; Borra DX para preparar la división: AX / BX
+    DIV BX ; AL = cociente, AH = resto; usamos el cociente para pulsar cada medio segundo
+    AND AX, 1 ; Alterna 0/1 para cambiar de estado de color cada ciclo
+
+    CMP AL, [alarm_color_state] ; Si el estado ya coincide, no hay que repintar
+    JE alarm_flash_update_done ; mismo estado, no hay que redibujar
+    MOV [alarm_color_state], AL ; Guarda el nuevo estado de color del parpadeo
+    CALL alarm_paint_screen ; Pinta la pantalla con el nuevo color
+
+alarm_flash_update_done:
+    POP DX
+    POP CX
+    POP BX
+    POP AX
+    RET
+
+; Pinta toda la pantalla con uno de dos colores según AL (0 o 1).
+; Solo cambia el byte de atributo de cada celda, no el carácter.
+alarm_paint_screen:
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DI
+    PUSH ES
+
+    CMP AL, 0 ; Estado 0 = fondo azul
+    JE alarm_paint_color_a ; Selecciona el primer esquema de color
+    MOV BL, 0x4F ; blanco sobre rojo: color 2 para el parpadeo activo
+    JMP alarm_paint_apply
+alarm_paint_color_a:
+    MOV BL, 0x1F ; blanco sobre azul: color 1 para el parpadeo activo
+
+alarm_paint_apply:
+    MOV AX, [video_mem_base] ; Segmento de memoria de video en modo texto VGA
+    MOV ES, AX ; ES apunta a la memoria de pantalla
+    XOR DI, DI ; DI = 0; empieza en la esquina superior izquierda
+    MOV CX, [screen_cells] ; Total de celdas visibles de la pantalla en modo texto
+
+alarm_paint_loop:
+    MOV [ES:DI+1], BL ; Escribe el atributo de color en cada celda
+    ADD DI, 2 ; Cada celda en modo texto ocupa 2 bytes: carácter + atributo
+    LOOP alarm_paint_loop
+
+    POP ES
+    POP DI
+    POP CX
+    POP BX
+    POP AX
+    RET
+
+; Restaura los colores normales (blanco sobre negro) al cancelar la alarma
+; y reinicia el estado de parpadeo para la proxima alarma.
+alarm_flash_reset:
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DI
+    PUSH ES
+
+    MOV AX, [video_mem_base] ; Memoria de video en modo texto
+    MOV ES, AX ; ES apunta a la VRAM
+    XOR DI, DI ; Comienza en la esquina superior izquierda
+    MOV CX, [screen_cells] ; Recorre todas las celdas visibles de la pantalla
+    MOV BL, 0x07 ; Blanco sobre negro: color base por defecto del BIOS
+
+alarm_flash_reset_loop:
+    MOV [ES:DI+1], BL ; Restaura el atributo de cada celda
+    ADD DI, 2 ; Cada celda ocupa 2 bytes en memoria de video
+    LOOP alarm_flash_reset_loop
+
+    MOV BYTE [alarm_color_state], 0FFh ; Fuerza un cambio al siguiente parpadeo
+
+    POP ES
+    POP DI
+    POP CX
+    POP BX
+    POP AX
+    RET
+
+cancel_alarm:
+    CMP BYTE [alarm_active], 1 ; Solo cancela si la alarma está activa
+    JNE cancel_alarm_done ; Si no está activa, no hace nada
+
+    CALL alarm_flash_reset ; Restaura el color normal de la pantalla antes de limpiar
+
+    CALL clear_alarm_line ; Borra el aviso visible de alarma
+    MOV BYTE [alarm_active], 0 ; Desactiva el flag global para dejarla inactiva
+    MOV BYTE [alarm_triggered], 0 ; Limpia el disparo previo para la próxima alarma
     MOV AH, 07h ; AH=07h => desactivar alarma del RTC
-    INT 1Ah ; BIOS RTC: desarma la alarma
-    CALL restore_alarm_handler ; vuelve al handler original del sistema
+    INT 1Ah ; BIOS RTC: desarma la alarma programada
+    CALL restore_alarm_handler ; Vuelve al handler original del sistema
 
 cancel_alarm_done:
     RET
 
 ; Muestra la alarma 
 ; La cancelación se hace con la tecla X
+; Imprime el aviso una sola vez 
 alarm_notify:
-    CALL clear_alarm_line ; limpia previo antes de mostrar el aviso actual
-    MOV DH, 5 ; fila donde se imprime la alarma
-    MOV SI, alarm_ring_msg ; texto: alarma activada, presione X para cancelar
-    CALL show_row ; imprime el mensaje en pantalla
-
-alarm_notify_wait:
-    CALL chrono_update
-    MOV AH, 01h ; AH=01h => revisa si hay tecla en el buffer
-    INT 16h ; ZF=1 si no hay tecla
-    JZ alarm_notify_wait ; espera sin bloquear
-
-    MOV AH, 00h ; AH=00h => lee la tecla presionada
-    INT 16h ; AL = código ASCII de la tecla
-    CALL upper_case ; normaliza a mayúscula
-    CMP AL, 'V' ; V => volver al menú
-    JE alarm_exit_to_menu
-    CMP AL, 'X' ; X => cancelar la alarma actual
-    JE alarm_notify_cancel
-    CMP AL, 'R' ; R => reiniciar cronómetro 
-    JNE not_alarm_notify_reset
-    CALL reset_chrono_global
-    JMP alarm_notify_wait
-
-not_alarm_notify_reset:
-    JMP alarm_notify_wait
-
-alarm_notify_cancel:
-    ; Borra el mensaje de alarma antes de salir para que desaparezca de pantalla.
-    CALL clear_alarm_line
-    CALL cancel_alarm ; desactiva la alarma y restaura el vector original
-    JMP mode_alarm_wait_exit
+    CMP BYTE [alarm_triggered], 1
+    JE alarm_notify_done
+    MOV BYTE [alarm_triggered], 1
+    MOV DH, 5
+    MOV SI, alarm_ring_msg
+    CALL show_row
+alarm_notify_done:
+    RET
 
 alarm_error:
     ; Si la alarma no pudo configurarse, se quita el vector propio y se muestra
@@ -441,24 +517,24 @@ alarm_handler:
     PUSH CS
     POP DS
 
-    ; La alarma debe permanecer activa hasta que el usuario la cancele con X.
-    CALL clear_alarm_line ; borra contenido previo antes de mostrar la alerta
-    MOV DH, 5 ; fila 5 para el aviso visual
-    MOV SI, alarm_ring_msg ; texto de alarma activa
-    CALL show_row ; imprime la alarma
-    MOV AL, 07h ; AL=07h => pitido del sistema
-    CALL putchar ; emite un beep simple
+    CMP BYTE [alarm_triggered], 1 ; ¿ya se había mostrado el aviso de esta alarma?
+    JE alarm_handler_done ; si ya estaba, no reimprime el mensaje
+    MOV DH, 5 ; línea reservada para el aviso de alarma
+    MOV SI, alarm_ring_msg        
+    CALL show_row             
+    MOV BYTE [alarm_triggered], 1  ; marca la alarma ejecutada
 
     ; alarm_triggered = 1 permite que el bucle principal salga del HLT y termine
     ; la rutina de espera de la alarma.
     MOV BYTE [alarm_triggered], 1 ; marca que la alarma ya disparó para el flujo principal
 
+alarm_handler_done:
     POP DS
     POP SI
     POP DX
     POP AX
     IRET
-
+    
 ; Modo reloj
 mode_clock:
     MOV BYTE [current_mode], 2
@@ -620,6 +696,7 @@ chrono_update:
     PUSH CX
     PUSH DX
 
+    CALL alarm_flash_update 
     ; Parte del tiempo acumulado durante pausas anteriores.
     MOV DX, [chrono_elapsed_low]
     MOV CX, [chrono_elapsed_high]
@@ -875,6 +952,9 @@ alarm_hour: DB 0
 alarm_minute: DB 0
 alarm_second: DB 0
 alarm_digits: TIMES 6 DB 0
+alarm_color_state: DB 0FFh 
+video_mem_base: DW 0xB800 ; Segmento de memoria de video en modo texto VGA
+screen_cells: DW 80 * 25 ; Total de celdas de texto del modo VGA (80x25)
 
 chrono_running: DB 0
 chrono_start_low: DW 0
