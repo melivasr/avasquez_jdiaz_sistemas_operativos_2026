@@ -235,18 +235,9 @@ cancel_alarm_from_menu:
     JMP menu_wait_key
 
 switch_clock_chrono:
+    CALL clear_screen
     CMP BYTE [current_mode], 2
-    JE switch_to_chrono
-    CMP BYTE [current_mode], 3
-    JE switch_to_clock
-    JMP mode_clock
-
-switch_to_chrono:
-    CALL clear_screen
-    JMP mode_chronometer
-
-switch_to_clock:
-    CALL clear_screen
+    JE mode_chronometer
     JMP mode_clock
 
 ; Modo alarma
@@ -280,6 +271,25 @@ mode_alarm:
     MOV DH, 3
     MOV SI, alarm_set_msg
     CALL show_row
+    JMP alarm_set_wait
+
+alarm_set_wait:
+    CALL check_alarm_state
+
+    MOV AH, 01h
+    INT 16h
+    JZ alarm_set_wait
+
+    MOV AH, 00h
+    INT 16h
+    CALL upper_case
+    CMP AL, 'Q'
+    JE halt
+    CMP AL, 'V'
+    JE menu_select_mode
+    CMP AL, 'X'
+    JNE alarm_set_wait
+    CALL cancel_alarm
     JMP menu_select_mode
 
 alarm_cancel_only:
@@ -289,10 +299,6 @@ alarm_cancel_only:
 alarm_read_reset:
     CALL reset_chrono_global
     JMP alarm_read
-
-alarm_exit_to_menu:
-    CALL clear_alarm_line
-    JMP menu_select_mode
 
 ; Comprueba si la alarma ya llegó a la hora programada.
 ; Si coincide, muestra la notificación y espera la tecla de cancelación.
