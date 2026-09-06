@@ -194,7 +194,11 @@ menu_wait_key:
     CMP AL, 'C'
     JE mode_chronometer
     CMP AL, 'R'
-    JE reset_chrono_global
+    JNE menu_check_v
+    CALL reset_chrono_global
+    JMP menu_wait_key
+
+menu_check_v:    
     CMP AL, 'V'
     JE menu_select_mode
     CMP AL, 'X'
@@ -217,18 +221,20 @@ switch_clock_chrono:
     JMP mode_clock
 
 switch_to_chrono:
+    CALL clear_screen
     JMP mode_chronometer
 
 switch_to_clock:
-    CALL clear_chrono_line
+    CALL clear_screen
     JMP mode_clock
 
 ; Modo alarma
 ; Pide la hora HHMMSS, la arma en el RTC y deja la alarma activa 
 mode_alarm:
     MOV BYTE [current_mode], 1
+    CALL clear_screen
     CALL read_alarm_time
-    JC mode_alarm_exit
+    JC menu_select_mode
 
     ; Limpia el estado previo para que una alarma vieja no siga bloqueando la
     ; siguiente programación.
@@ -268,20 +274,22 @@ mode_alarm_wait_exit:
     CMP AL, 'X' ; X => cancelar la alarma, sin volver al menú
     JE alarm_cancel_only
     CMP AL, 'R' ; R => reiniciar el cronómetro sin cambiar de modo
-    JE reset_chrono_global
-    CMP AL, 'S' ; S => alternar reloj/cronómetro
-    JE switch_clock_chrono
+    JE alarm_read_reset
+    JMP mode_alarm_wait_exit
+
+not_alarm_reset:
     JMP mode_alarm_wait_exit
 
 alarm_cancel_only:
     CALL cancel_alarm
     JMP mode_alarm_wait_exit
 
+alarm_read_reset:
+    CALL reset_chrono_global
+    JMP alarm_read
+
 alarm_exit_to_menu:
     CALL clear_alarm_line
-    JMP menu_select_mode
-
-mode_alarm_exit:
     JMP menu_select_mode
 
 ; Comprueba si la alarma ya llegó a la hora programada.
@@ -316,18 +324,6 @@ clear_alarm_line:
     MOV DL, 0 ; columna 0
     CALL set_cursor ; ubica cursor en la línea del mensaje
     CALL clear_line ; limpia la fila completa para ocultar la alarma
-    POP DX
-    POP AX
-    RET
-
-; Limpia la línea donde se muestra el tiempo del cronómetro.
-clear_chrono_line:
-    PUSH AX
-    PUSH DX
-    MOV DH, 4 ; fila 4 = línea del tiempo del cronómetro
-    MOV DL, 0 ; columna 0
-    CALL set_cursor
-    CALL clear_line
     POP DX
     POP AX
     RET
@@ -368,14 +364,18 @@ alarm_notify_wait:
     CMP AL, 'X' ; X => cancelar la alarma actual
     JE alarm_notify_cancel
     CMP AL, 'R' ; R => reiniciar cronómetro 
-    JE reset_chrono_global
+    JNE not_alarm_notify_reset
+    CALL reset_chrono_global
+    JMP alarm_notify_wait
+
+not_alarm_notify_reset:
     JMP alarm_notify_wait
 
 alarm_notify_cancel:
     ; Borra el mensaje de alarma antes de salir para que desaparezca de pantalla.
     CALL clear_alarm_line
     CALL cancel_alarm ; desactiva la alarma y restaura el vector original
-    RET
+    JMP mode_alarm_wait_exit
 
 alarm_error:
     ; Si la alarma no pudo configurarse, se quita el vector propio y se muestra
@@ -464,17 +464,17 @@ alarm_handler:
 ; Modo reloj
 mode_clock:
     MOV BYTE [current_mode], 2
-    MOV DH, 1 ;Posicion donde se imprime
+    CALL clear_screen
+    ; Se imprime solo la hora y las instrucciones del modo reloj.
+    MOV DH, 3
     MOV SI, clock_msg
-    CALL show_row
-    MOV DH, 2
-    MOV SI, clock_msg2
     CALL show_row
     CALL print_time_loop
 
 ; Modo chronometro
 mode_chronometer:
     MOV BYTE [current_mode], 3
+    CALL clear_screen
     ; Solo se inicializa la primera vez que entra al cronómetro.
     ; Si ya existía un estado previo, se conserva para que siga contando.
     CMP BYTE [chrono_initialized], 1
@@ -583,23 +583,8 @@ reset_chrono_global:
     MOV [chrono_start_low], DX
     MOV AL, 1
     MOV [chrono_running], AL
+    MOV BYTE [chrono_initialized], 1
     RET
-
-chrono_reset:
-    ; Reinicio global del cronometro.
-    CALL reset_chrono_global
-    JMP chrono_loop
-
-;Si el usuario presiona V, vuelve al menu
-
-wait_for_v:
-    CALL read_key
-    CALL upper_case
-
-    CMP AL, 'V'
-    JE menu_select_mode
-
-    JMP wait_for_v
 
 ; Lee el contador de ticks desde medianoche: CX:DX.
 ; INT 1Ah / AH=00h devuelve la hora del sistema en ticks del RTC,
@@ -758,6 +743,8 @@ alarm_read:
     JE alarm_config_exit_to_menu
     CMP AL, 'X'
     JE alarm_cancel_only
+    CMP AL, 'R'
+    JE alarm_read_reset
     CMP AL, '0'
     JB alarm_read
     CMP AL, '9'
@@ -827,7 +814,7 @@ print_time_update:
 
     MOV BL, BH ; Guarda el segundo actual para comparar luego
 
-    MOV DH, 2 ;Posicion donde se imprime 
+    MOV DH, 2 ; Fila de la hora actual
     MOV SI, hora_msg
     CALL show_row
 
@@ -873,14 +860,12 @@ alarm_hora_msg: DB "Hora de alarma (HHMMSS): ", 0
 alarm_invalid_msg: DB "Hora invalida. Use un valor entre 000000 y 235959.", 0
 alarm_set_msg: DB "Alarma configurada. Presione V para volver al menu.", 0
 alarm_ring_msg: DB "*** ALARMA ACTIVADA, presione X para cancelar ***", 0
-clock_msg: DB 0x0D, 0x0A, "Modo reloj activado, presione V para volver al menu", 0x0D, 0x0A, 0
 
 chrono_msg: DB "Modo cronometro", 0
 chrono_controls_msg: DB "I=Iniciar/Reanudar  P=Pausar  R=Reiniciar  V=Volver", 0
 chrono_time_msg: DB "Tiempo: ", 0
 hora_msg: DB "Hora actual: ", 0 ; Texto para la hora
-clock_msg2: DB "Presione S para cambiar entre reloj y cronometro. V para volver al menu", 0 ; Texto para la hora
-new_line: DB 0x0D, 0x0A, 0 ; Salto de línea
+clock_msg: DB "Presione S para cambiar entre reloj y cronometro. V para volver al menu", 0 ; Texto para la hora
 
 current_mode: DB 0
 chrono_initialized: DB 0
