@@ -13,9 +13,13 @@ main:
     CALL menu_select_mode ; Muestra el menú y espera la seleccion del usuario
 
 halt:
-    CLI ; Deshabilita las interrupciones
-    HLT ; Detiene la CPU hasta que ocurra una interrupción
-    JMP halt; Mantiene el sistema detenido de forma indefinida
+    MOV DX, 0x604  ; puerto ACPI de apagado que usa QEMU
+    MOV AX, 0x2000 ; valor que dispara el shutdown
+    OUT DX, AX
+    ; si por algún motivo no cerró, cae en halt y queda en un bucle infinito.
+    CLI
+    HLT
+    JMP halt
 
 
 ; Imprime una cadena terminada en 0
@@ -187,6 +191,9 @@ menu_wait_key:
     INT 16h
     CALL upper_case
 
+    CMP AL, 'Q' ; Q => apaga el sistema desde cualquier punto
+    JE halt
+
     CMP AL, 'A'
     JE mode_alarm
     CMP AL, 'H'
@@ -269,6 +276,10 @@ mode_alarm_wait_exit:
     MOV AH, 00h ; AH=00h => lee la tecla del teclado
     INT 16h ; AL = ASCII de la tecla presionada
     CALL upper_case ; convierte a mayúscula si era minúscula
+
+    CMP AL, 'Q' ; Q => apaga el sistema, incluso con la alarma armada
+    JE halt
+
     CMP AL, 'V' ; V => volver al menú
     JE alarm_exit_to_menu
     CMP AL, 'X' ; X => cancelar la alarma, sin volver al menú
@@ -589,6 +600,9 @@ chrono_loop:
     INT 16h
     CALL upper_case
 
+    CMP AL, 'Q'; Q => apaga el sistema
+    JE halt
+
     ; Comandos del cronómetro:
     ; I = iniciar/reanudar, P = pausar, R = reiniciar, V = volver al menú,
     ; X = cancelar alarma activa si existe.
@@ -814,6 +828,10 @@ read_alarm_time:
 alarm_read:
     CALL read_key
     CALL upper_case
+
+    CMP AL, 'Q'
+    JE halt
+
     CMP AL, 'V'
     JE alarm_config_exit_to_menu
     CMP AL, 'X'
@@ -915,6 +933,9 @@ check_for_v:
     INT 16h
     CALL upper_case
 
+    CMP AL, 'Q' ; Q => apaga el sistema
+    JE halt
+
     CMP AL, 'V'
     JE menu_select_mode
     CMP AL, 'X'
@@ -928,7 +949,7 @@ check_for_v:
 
 ;Mensajes para mostrar en pantalla
 os_boot_msg: DB "meliOS is working...", 0x0D, 0x0A, 0 
-menu_msg: DB 0x0D, 0x0A, "Seleccione modo: A=Alarma  H=Hora Actual  C=Cronometro", 0x0D, 0x0A, 0
+menu_msg: DB 0x0D, 0x0A, "Seleccione modo: A=Alarma  H=Hora Actual  C=Cronometro  Q=Salir", 0x0D, 0x0A, 0
 invalid_msg: DB 0x0D, 0x0A, "Opcion invalida. Presione A=Alarma, H=Hora Actual, C=Cronometro o V.", 0x0D, 0x0A, 0
 alarm_msg: DB "Modo alarma: presione X para cancelar o V para volver al menu", 0
 alarm_hora_msg: DB "Hora de alarma (HHMMSS): ", 0
