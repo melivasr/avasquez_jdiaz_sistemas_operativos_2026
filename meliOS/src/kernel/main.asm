@@ -954,7 +954,7 @@ time_check_s:
 ;Mensajes para mostrar en pantalla
 os_boot_msg: DB "meliOS is working...", 0x0D, 0x0A, 0 
 start_msg: DB 'Para entrar en modo interactivo presione la tecla "I", para cerrar presione "Q".', 0x0D, 0x0A, 0
-menu_msg: DB 0x0D, 0x0A, "Seleccione modo: A=Alarma  H=Hora Actual  C=Cronometro R=Reiniciar cronometro Q=Salir", 0x0D, 0x0A, 0
+menu_msg: DB 0x0D, 0x0A, "Seleccione modo: A=Alarma  H=Hora Actual  C=Cronometro R=Reiniciar cronometro Q=Cerrar", 0x0D, 0x0A, 0
 invalid_msg: DB 0x0D, 0x0A, "Opcion invalida. Presione A=Alarma, H=Hora Actual, C=Cronometro o V.", 0x0D, 0x0A, 0
 alarm_msg: DB "Modo alarma: presione X para cancelar o V para volver al menu", 0
 alarm_hora_msg: DB "Hora de alarma (HHMMSS): ", 0
