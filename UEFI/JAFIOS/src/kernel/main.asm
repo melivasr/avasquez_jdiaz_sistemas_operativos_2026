@@ -309,15 +309,19 @@ modo_alarma:
 ;
 modo_alarma_loop:
     call read_key
+
     cmp ax, 'i'
     je ingresar_alarma
     cmp ax, 'd'
     je desactivar_alarma
+    cmp ax, 'v'
+    je menu
+    jmp modo_alarma_loop
 ;
 ingresar_alarma:
     call read_alarm
-    mov [rel alarm_activated], 1 ; alarma activa
-    mov rcx, [rel alarm_success_msg]
+    mov byte [rel alarm_activated], 1 ; alarma activa
+    lea rcx, [rel alarm_success_msg]
     call print
     jmp ingresar_alarma_loop
 ;
@@ -325,18 +329,19 @@ ingresar_alarma_loop:
     call read_key
     cmp ax, 'v'
     je menu
+    jmp ingresar_alarma_loop
 ;
 desactivar_alarma:
     mov al, [rel alarm_activated]
     cmp al, 0
     je no_alarm ; si no, entonces si hay alarma
-    mov rcx, [rel alarm_erased_msg]
+    lea rcx, [rel alarm_erased_msg]
     call print
-    mov [rel alarm_activated], 0
+    mov byte [rel alarm_activated], 0
     jmp desactivar_alarma_loop
 ;
 no_alarm:
-    mov rcx, [rel no_alarm_msg]
+    lea rcx, [rel no_alarm_msg]
     call print
     jmp desactivar_alarma_loop
 ;
@@ -344,6 +349,7 @@ desactivar_alarma_loop:
     call read_key
     cmp ax, 'v'
     je menu
+    jmp desactivar_alarma_loop
 ;
 
 ; ============================================================
@@ -377,11 +383,11 @@ revisar_alarma:
     ; time_pointer: Y1,Y2, M, D, H, Min, Seg
 
     movzx ax, byte [rel time_pointer+4]  ; Hour
-    cmp ax, [rel alarm_hour]
+    cmp al, [rel alarm_hour]             ; comparar BYTE
     jne alarm_not_yet
 
     movzx ax, byte [rel time_pointer+5]  ; Min
-    cmp ax, [rel alarm_minute]
+    cmp al, [rel alarm_minute]           ; comparar BYTE
     jne alarm_not_yet
 
     ; HACER QUE LA PANTALLA CAMBIE USANDO SET ATRIBUTE
@@ -430,119 +436,350 @@ cambiar_color_normal:
 
 ;
 ; ============================================================
-; read_alarm. Usa Read Key
+; read_alarm
 ;
-; Salida: (no ascii)
-;   [alarm_hour]   = hora
-;   [alarm_minute] = minuto
+; Entrada:
+;   HH MM<ENTER>
 ;
 ; Ejemplo:
 ;   14 35<ENTER>
+;
+; Salida:
+;   [alarm_hour]   = 14
+;   [alarm_minute] = 35
+;
+; input_state:
+;   0 = hora
+;   1 = minutos
+;
+; digit_count:
+;   cantidad de dígitos introducidos del campo actual
 ; ============================================================
 
 read_alarm:
+
+    ; --------------------------------------------------------
     ; Inicializar
-    mov word [current_number], 0
-    mov byte [input_state], 0 ; Establecer modo hora
-;
-.read_key:
+    ; --------------------------------------------------------
+
+    mov word [rel current_number], 0
+    mov byte [rel input_state], 0
+    mov byte [rel input_index], 0
+    mov byte [rel digit_count], 0
+
+    ; alarm_array = ""
+    mov word [rel alarm_array], 0
+
+
+; ============================================================
+; LOOP PRINCIPAL
+; ============================================================
+
+read_key_alarm:
+
+    ; --------------------------------------------------------
+    ; Revisar si ocurrió la alarma
+    ; --------------------------------------------------------
+
+    call revisar_alarma
+
+
+    ; --------------------------------------------------------
+    ; Mostrar pantalla
+    ; --------------------------------------------------------
+
+    call clear
+
+    lea rcx, [rel poner_alarma_msg]
+    call print
+
+    lea rcx, [rel alarm_array]
+    call print
+
+
+    ; --------------------------------------------------------
+    ; WAIT FOR EVENT
+    ;
+    ; efi_events[0] = Keyboard
+    ; efi_events[1] = Timer
+    ; --------------------------------------------------------
+
+    mov rax, [rel bootServices_addr]
+    mov rax, [rax + EFI_WAIT_FOR_EVENT_off]
+
+    mov rcx, 2
+    lea rdx, [rel efi_events]
+    lea r8, [rel efi_events_index]
+
+    ; Shadow space de Windows x64 / UEFI ABI
+    sub rsp, 32
+    call rax
+    add rsp, 32
+
+
+    ; --------------------------------------------------------
+    ; ¿Qué evento ocurrió?
+    ; --------------------------------------------------------
+
+    ; 0 = teclado
+    cmp qword [rel efi_events_index], 0
+    je keyboard_alarm
+
+    ; 1 = timer
+    cmp qword [rel efi_events_index], 1
+    je read_key_alarm
+
+
+    ; Si por alguna razón ocurre otro índice,
+    ; simplemente volver a esperar.
+    jmp read_key_alarm
+
+
+; ============================================================
+; KEYBOARD
+; ============================================================
+
+keyboard_alarm:
 
     call read_key
 
-    cmp ax, 13                  ; '\r'
+    ; --------------------------------------------------------
+    ; ENTER
+    ; --------------------------------------------------------
+
+    cmp ax, 13
     je .enter
+
+
+    ; --------------------------------------------------------
+    ; SPACE
+    ; --------------------------------------------------------
 
     cmp ax, ' '
     je .space
 
-    ; Verificar que sea digito de 0 - 9
+
+    ; --------------------------------------------------------
+    ; Verificar que sea dígito 0-9
+    ; --------------------------------------------------------
+
     cmp ax, '0'
-    jb .read_key
+    jb read_key_alarm
 
     cmp ax, '9'
-    ja .read_key
+    ja read_key_alarm
 
-    ;  ASCII → número
+
+    ; --------------------------------------------------------
+    ; Verificar máximo 2 dígitos
+    ; --------------------------------------------------------
+
+    cmp byte [rel digit_count], 2
+    jae read_key_alarm
+
+
+    ; ========================================================
+    ; GUARDAR ASCII EN alarm_array
+    ; ========================================================
+    movzx rbx, byte [rel input_index]
+    lea rcx, [rel alarm_array]
+    mov word [rcx + rbx*2], ax        
+
+    inc byte [rel input_index]
+
+    movzx rbx, byte [rel input_index]
+    lea rcx, [rel alarm_array]
+    mov word [rcx + rbx*2], 0         
+
+
+    ; ========================================================
+    ; ASCII -> número
+    ; ========================================================
+
     sub ax, '0'
 
-    ; current_number = current_number * 10 + digit
+    ; eax = digit
     movzx eax, ax
-    movzx edx, word [current_number]
 
+    ; edx = current_number
+    movzx edx, word [rel current_number]
+
+    ; current_number * 10
     imul edx, edx, 10
+
+    ; + digit
     add edx, eax
 
-    mov [current_number], dx
+    ; Guardar resultado
+    mov word [rel current_number], dx
 
-    jmp .read_key
+
+    ; --------------------------------------------------------
+    ; Incrementar cantidad de dígitos
+    ; --------------------------------------------------------
+
+    inc byte [rel digit_count]
 
 
-;
+    ; --------------------------------------------------------
+    ; Volver al loop
+    ; --------------------------------------------------------
+
+    jmp read_key_alarm
+
+
 ; ============================================================
 ; SPACE
+;
+; Termina HH y pasa a MM
 ; ============================================================
 
 .space:
 
-    cmp byte [input_state], 0
-    jne .read_key
+    ; SPACE solamente es válido en HH
+    cmp byte [rel input_state], 0
+    jne read_key_alarm
 
-    ; Si hay espacio, se está terminando de introducir la hora
 
-    mov ax, [current_number]
+    ; --------------------------------------------------------
+    ; Deben existir exactamente 2 dígitos
+    ; --------------------------------------------------------
 
-    ; Validar 0 <= HH <= 23
+    cmp byte [rel digit_count], 2
+    jne .invalid
+
+
+    ; --------------------------------------------------------
+    ; Validar HH <= 23
+    ; --------------------------------------------------------
+
+    mov ax, [rel current_number]
+
     cmp ax, 23
     ja .invalid
 
-    mov [alarm_hour], al
 
     ; --------------------------------------------------------
-    ; Cambiar a modo MINUTOS
+    ; Guardar hora
     ; --------------------------------------------------------
 
-    mov byte [input_state], 1
-    mov word [current_number], 0
-
-    jmp .read_key
+    mov [rel alarm_hour], al
 
 
-;
+    ; ========================================================
+    ; Agregar SPACE al texto
+    ; ========================================================
+
+    movzx rbx, byte [rel input_index]
+    lea rcx, [rel alarm_array]
+    mov word [rcx + rbx*2], ' '       
+
+    inc byte [rel input_index] ; input_index++
+
+
+    ; --------------------------------------------------------
+    ; Agregar '\0'
+    ; --------------------------------------------------------
+
+    movzx rbx, byte [rel input_index]
+
+    lea rcx, [rel alarm_array]
+    mov word [rcx + rbx*2], 0
+
+
+    ; ========================================================
+    ; Cambiar a MINUTOS
+    ; ========================================================
+
+    mov byte [rel input_state], 1
+
+    ; Reiniciar número
+    mov word [rel current_number], 0
+
+    ; Reiniciar contador de dígitos
+    mov byte [rel digit_count], 0
+
+
+    jmp read_key_alarm
+
+
 ; ============================================================
 ; ENTER
+;
+; Termina MM
 ; ============================================================
 
 .enter:
 
-    ; Enter solamente es válido después de los minutos
-    cmp byte [input_state], 1
-    jne .read_key
+    ; --------------------------------------------------------
+    ; ENTER solamente es válido después de HH
+    ; --------------------------------------------------------
 
-    mov ax, [current_number]
+    cmp byte [rel input_state], 1
+    jne read_key_alarm
 
-    ; Validar 0 <= MM <= 59
+
+    ; --------------------------------------------------------
+    ; Deben existir exactamente 2 dígitos
+    ; --------------------------------------------------------
+
+    cmp byte [rel digit_count], 2
+    jne .invalid
+
+
+    ; --------------------------------------------------------
+    ; Validar MM <= 59
+    ; --------------------------------------------------------
+
+    mov ax, [rel current_number]
+
     cmp ax, 59
     ja .invalid
 
-    mov [alarm_minute], al
+
+    ; --------------------------------------------------------
+    ; Guardar minutos
+    ; --------------------------------------------------------
+
+    mov [rel alarm_minute], al
+
+
+    ; --------------------------------------------------------
+    ; Alarma configurada correctamente
+    ; --------------------------------------------------------     
 
     ret
 
 
-;
 ; ============================================================
-; Entrada inválida
+; ENTRADA INVÁLIDA
 ; ============================================================
 
 .invalid:
 
-    mov rcx, [rel alarm_err_msg]
-    call print ; "Hora invalida"
+    call clear
 
-    mov word [current_number], 0
-    mov byte [input_state], 0
+    lea rcx, [rel alarm_err_msg]
+    call print
 
-    jmp .read_key
+
+    ; --------------------------------------------------------
+    ; Reiniciar entrada
+    ; --------------------------------------------------------
+
+    mov word [rel current_number], 0
+
+    mov byte [rel input_state], 0
+
+    mov byte [rel input_index], 0
+
+    mov byte [rel digit_count], 0
+
+    mov word [rel alarm_array], 0     
+
+
+    ; Volver a esperar
+    jmp read_key_alarm
 
 ;
 ; ========================================================
@@ -807,6 +1044,7 @@ poner_alarma_msg:
     dw 13, 10, 0
 ;
 alarm_success_msg:
+    dw 13, 10
     utf16str "Alarma ingresada exitosamente! Opciones: V = Volver al menú"
     dw 13, 10, 0
 ;
@@ -863,14 +1101,23 @@ efi_events_index: dq 0
 ; De read key
 key_pointer: dq 0
 
-; Para alarma
-alarm_hour:      db 0
-alarm_minute:    db 0
+; ============================================================
+; Variables Alarm
+; ============================================================
+
+current_number:     dw 0
+input_state:         db 0       ; 0 = HH, 1 = MM
+input_index:         db 0
+digit_count:         db 0
+
+alarm_hour:         db 0
+alarm_minute:       db 0
 
 alarm_activated: db 0
 
-current_number:  dw 0
-input_state:    db 0        ; 0 = hora, 1 = minutos
+; "HH MM" + null = 6 word
+alarm_array: 
+    times 6 dw 0   ; 6 CHAR16: "HH MM" + null
 
 key:
     dw 0                    ; ScanCode
