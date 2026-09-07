@@ -34,6 +34,8 @@ EFI_CREATE_EVENT_off equ 0x50; offset desde BootServices
 EFI_SET_TIMER_off equ 0x58; offset desde BootServices
 EFI_WAIT_FOR_EVENT_off equ 0x60; offset desde BootServices
 
+EFI_CLOSE_EVENT_off equ 0x70
+
 ; ============================================================
 ; START
 ; ============================================================
@@ -94,9 +96,6 @@ menu_loop:
     cmp ax, 'c'
     je modo_cron
 
-    cmp ax, 'v'
-    je modo_cron
-
     cmp ax, 'a'
     je modo_alarma
 
@@ -119,13 +118,25 @@ modo_reloj:
     call clear
     lea rcx, [rel reloj_msg]
     call print
-    mov byte [guardar_seg], 1 ; habilitar guardar seg
+    mov byte [rel guardar_seg], 1 ; habilitar guardar seg
     call get_time ; devuelve 
     lea rcx, [rel reloj_array]
     call print
-    mov byte [guardar_seg], 0 ; deshabilitar guardar seg
+    mov byte [rel guardar_seg], 0 ; deshabilitar guardar seg
 ;
 modo_reloj_loop:
+
+    ; WAIT FOR EVENT -> Esperar Evento Key o Timer
+    mov rax, [rel bootServices_addr]
+    mov rax, [rax + EFI_WAIT_FOR_EVENT_off]
+    mov rcx, 2
+    lea rdx, [rel efi_events]
+    lea r8, [rel efi_events_index]
+
+    sub rsp, 32
+    call rax
+    add rsp, 32
+
     ; Volver al menú
     call read_key ; devuelve ascii en ax
     cmp ax, 'v' 
@@ -321,6 +332,9 @@ modo_alarma_loop:
 ingresar_alarma:
     call read_alarm
     mov byte [rel alarm_activated], 1 ; alarma activa
+    call revisar_alarma
+    call clear
+
     lea rcx, [rel alarm_success_msg]
     call print
     jmp ingresar_alarma_loop
@@ -335,17 +349,39 @@ desactivar_alarma:
     mov al, [rel alarm_activated]
     cmp al, 0
     je no_alarm ; si no, entonces si hay alarma
+
+    mov byte [rel alarm_activated], 0
+    call revisar_alarma
+    call clear
     lea rcx, [rel alarm_erased_msg]
     call print
-    mov byte [rel alarm_activated], 0
     jmp desactivar_alarma_loop
 ;
 no_alarm:
     lea rcx, [rel no_alarm_msg]
     call print
     jmp desactivar_alarma_loop
+
 ;
 desactivar_alarma_loop:
+
+    ; WAIT FOR EVENT
+    mov rax, [rel bootServices_addr]
+    mov rax, [rax + EFI_WAIT_FOR_EVENT_off]
+
+    mov rcx, 2
+    lea rdx, [rel efi_events]
+    lea r8, [rel efi_events_index]
+
+    ; Shadow space de Windows x64 / UEFI ABI
+    sub rsp, 32
+    call rax
+    add rsp, 32
+
+    ; 1 = timer
+    cmp qword [rel efi_events_index], 1
+    je desactivar_alarma_loop
+    
     call read_key
     cmp ax, 'v'
     je menu
@@ -391,7 +427,8 @@ revisar_alarma:
     jne alarm_not_yet
 
     ; HACER QUE LA PANTALLA CAMBIE USANDO SET ATRIBUTE
-    call cambiar_color_blanco_rojo
+    call cambiar_color_blanco_cyan
+
     ret
 ;
 alarm_not_yet:
@@ -409,6 +446,21 @@ cambiar_color_blanco_rojo:
     mov rcx, rax ; this
     mov rax, [rax + EFI_SET_ATTRIBUTE_off]
     mov rdx, 0x4F    ; blanco sobre rojo
+
+    sub rsp, 32 ; shadow space
+    call rax
+    add rsp, 32
+
+    test rax, rax
+    jnz error
+
+    ret
+
+cambiar_color_blanco_cyan:
+    mov rax, [rel conout_addr]
+    mov rcx, rax ; this
+    mov rax, [rax + EFI_SET_ATTRIBUTE_off]
+    mov rdx, 0x3F    ; blanco sobre rojo
 
     sub rsp, 32 ; shadow space
     call rax
@@ -458,9 +510,7 @@ cambiar_color_normal:
 
 read_alarm:
 
-    ; --------------------------------------------------------
     ; Inicializar
-    ; --------------------------------------------------------
 
     mov word [rel current_number], 0
     mov byte [rel input_state], 0
@@ -477,16 +527,7 @@ read_alarm:
 
 read_key_alarm:
 
-    ; --------------------------------------------------------
-    ; Revisar si ocurrió la alarma
-    ; --------------------------------------------------------
-
     call revisar_alarma
-
-
-    ; --------------------------------------------------------
-    ; Mostrar pantalla
-    ; --------------------------------------------------------
 
     call clear
 
@@ -496,13 +537,9 @@ read_key_alarm:
     lea rcx, [rel alarm_array]
     call print
 
-
-    ; --------------------------------------------------------
     ; WAIT FOR EVENT
-    ;
     ; efi_events[0] = Keyboard
     ; efi_events[1] = Timer
-    ; --------------------------------------------------------
 
     mov rax, [rel bootServices_addr]
     mov rax, [rax + EFI_WAIT_FOR_EVENT_off]
@@ -516,11 +553,6 @@ read_key_alarm:
     call rax
     add rsp, 32
 
-
-    ; --------------------------------------------------------
-    ; ¿Qué evento ocurrió?
-    ; --------------------------------------------------------
-
     ; 0 = teclado
     cmp qword [rel efi_events_index], 0
     je keyboard_alarm
@@ -529,12 +561,11 @@ read_key_alarm:
     cmp qword [rel efi_events_index], 1
     je read_key_alarm
 
-
-    ; Si por alguna razón ocurre otro índice,
-    ; simplemente volver a esperar.
+    ; Si por alguna razón ocurre otro índice
     jmp read_key_alarm
 
 
+;
 ; ============================================================
 ; KEYBOARD
 ; ============================================================
@@ -543,25 +574,13 @@ keyboard_alarm:
 
     call read_key
 
-    ; --------------------------------------------------------
-    ; ENTER
-    ; --------------------------------------------------------
-
     cmp ax, 13
     je .enter
-
-
-    ; --------------------------------------------------------
-    ; SPACE
-    ; --------------------------------------------------------
 
     cmp ax, ' '
     je .space
 
-
-    ; --------------------------------------------------------
     ; Verificar que sea dígito 0-9
-    ; --------------------------------------------------------
 
     cmp ax, '0'
     jb read_key_alarm
@@ -569,10 +588,7 @@ keyboard_alarm:
     cmp ax, '9'
     ja read_key_alarm
 
-
-    ; --------------------------------------------------------
     ; Verificar máximo 2 dígitos
-    ; --------------------------------------------------------
 
     cmp byte [rel digit_count], 2
     jae read_key_alarm
@@ -614,20 +630,13 @@ keyboard_alarm:
     mov word [rel current_number], dx
 
 
-    ; --------------------------------------------------------
-    ; Incrementar cantidad de dígitos
-    ; --------------------------------------------------------
-
+    ; digit_cpunt ++
     inc byte [rel digit_count]
-
-
-    ; --------------------------------------------------------
-    ; Volver al loop
-    ; --------------------------------------------------------
 
     jmp read_key_alarm
 
 
+;
 ; ============================================================
 ; SPACE
 ;
@@ -640,57 +649,32 @@ keyboard_alarm:
     cmp byte [rel input_state], 0
     jne read_key_alarm
 
-
-    ; --------------------------------------------------------
     ; Deben existir exactamente 2 dígitos
-    ; --------------------------------------------------------
-
     cmp byte [rel digit_count], 2
     jne .invalid
 
-
-    ; --------------------------------------------------------
     ; Validar HH <= 23
-    ; --------------------------------------------------------
-
     mov ax, [rel current_number]
-
     cmp ax, 23
     ja .invalid
 
-
-    ; --------------------------------------------------------
     ; Guardar hora
-    ; --------------------------------------------------------
-
     mov [rel alarm_hour], al
 
-
-    ; ========================================================
     ; Agregar SPACE al texto
-    ; ========================================================
-
     movzx rbx, byte [rel input_index]
     lea rcx, [rel alarm_array]
     mov word [rcx + rbx*2], ' '       
 
     inc byte [rel input_index] ; input_index++
 
-
-    ; --------------------------------------------------------
-    ; Agregar '\0'
-    ; --------------------------------------------------------
-
+    ; Agregar '\0' end of line
     movzx rbx, byte [rel input_index]
 
     lea rcx, [rel alarm_array]
     mov word [rcx + rbx*2], 0
 
-
-    ; ========================================================
     ; Cambiar a MINUTOS
-    ; ========================================================
-
     mov byte [rel input_state], 1
 
     ; Reiniciar número
@@ -699,10 +683,9 @@ keyboard_alarm:
     ; Reiniciar contador de dígitos
     mov byte [rel digit_count], 0
 
-
     jmp read_key_alarm
 
-
+;
 ; ============================================================
 ; ENTER
 ;
@@ -711,72 +694,57 @@ keyboard_alarm:
 
 .enter:
 
-    ; --------------------------------------------------------
     ; ENTER solamente es válido después de HH
-    ; --------------------------------------------------------
-
     cmp byte [rel input_state], 1
     jne read_key_alarm
 
-
-    ; --------------------------------------------------------
     ; Deben existir exactamente 2 dígitos
-    ; --------------------------------------------------------
-
     cmp byte [rel digit_count], 2
     jne .invalid
 
-
-    ; --------------------------------------------------------
     ; Validar MM <= 59
-    ; --------------------------------------------------------
-
     mov ax, [rel current_number]
 
     cmp ax, 59
     ja .invalid
 
-
-    ; --------------------------------------------------------
     ; Guardar minutos
-    ; --------------------------------------------------------
-
     mov [rel alarm_minute], al
 
-
-    ; --------------------------------------------------------
     ; Alarma configurada correctamente
-    ; --------------------------------------------------------     
-
     ret
 
 
+;
 ; ============================================================
 ; ENTRADA INVÁLIDA
 ; ============================================================
 
 .invalid:
 
+    call revisar_alarma
     call clear
 
     lea rcx, [rel alarm_err_msg]
     call print
 
-
-    ; --------------------------------------------------------
     ; Reiniciar entrada
-    ; --------------------------------------------------------
-
     mov word [rel current_number], 0
-
     mov byte [rel input_state], 0
-
     mov byte [rel input_index], 0
-
     mov byte [rel digit_count], 0
+    mov word [rel alarm_array], 0    
+    
+    ; WAIT FOR EVENT -> Esperar Evento Key o Timer
+    mov rax, [rel bootServices_addr]
+    mov rax, [rax + EFI_WAIT_FOR_EVENT_off]
+    mov rcx, 2
+    lea rdx, [rel efi_events]
+    lea r8, [rel efi_events_index]
 
-    mov word [rel alarm_array], 0     
-
+    sub rsp, 32
+    call rax
+    add rsp, 32
 
     ; Volver a esperar
     jmp read_key_alarm
@@ -849,9 +817,9 @@ get_time:
     mov [rel reloj_array+14], ah
 
     ; revisar bit para ver si guardar seg
-    cmp byte [guardar_seg], 1 
+    cmp byte [rel guardar_seg], 1 
     jne no_guardar
-    mov [seg_actual], ah
+    mov [rel seg_actual], ah
 no_guardar:
     ret
 
@@ -1000,6 +968,40 @@ error:
 ; Volver a UEFI
 ; ========================================================
 exit:
+    ; ==========================================
+    ; CANCELAR TIMER
+    ; ==========================================
+
+    mov rax, [rel bootServices_addr]
+    mov rax, [rax + EFI_SET_TIMER_off]
+
+    mov rcx, [rel TimerEvent]    ; Event
+    xor edx, edx                 ; TimerCancel = 0
+    xor r8, r8                   ; TriggerTime = 0
+
+    sub rsp, 32
+    call rax
+    add rsp, 32
+
+    ; ==========================================
+    ; CERRAR TIMER EVENT
+    ; ==========================================
+
+    mov rax, [rel bootServices_addr]
+    mov rax, [rax + EFI_CLOSE_EVENT_off]
+
+    mov rcx, [rel TimerEvent]
+
+    sub rsp, 32
+    call rax
+    add rsp, 32
+
+    mov qword [rel TimerEvent], 0
+
+    ; ==========================================
+    ; RESTAURAR STACK
+    ; ==========================================
+
     mov rsp, rbp
     pop rbp
     ret
@@ -1032,7 +1034,7 @@ in_cron_msg:
     dw 13, 10, 0
 ;
 pausa_msg:
-    utf16str "Cronometro en pausa!: Opciones: C = Continuar, R = Reiniciar, V = Volver al menu, W = Cambiar de modo"
+    utf16str "Cronometro pausado!: Opciones: C = Continuar, R = Reiniciar, V = Volver al menu, W = Cambiar de modo"
     dw 13, 10, 0
 ;
 alarma_msg:
@@ -1049,7 +1051,7 @@ alarm_success_msg:
     dw 13, 10, 0
 ;
 alarm_err_msg:
-    utf16str "HH/MM inválido. Prueba con HH<Space>MM<Enter>"
+    utf16str "HH/MM invalido. Prueba con HH<Space>MM<Enter>"
     dw 13, 10, 0
 ;
 alarm_erased_msg:
@@ -1058,6 +1060,10 @@ alarm_erased_msg:
 ;
 no_alarm_msg:
     utf16str "No hay alarma configurada! Presione V para volver al menu"
+    dw 13, 10, 0
+
+default_msg:
+    utf16str "Presione V para volver al menu!"
     dw 13, 10, 0
 ; 
 err_msg:

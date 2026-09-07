@@ -45,7 +45,6 @@ EFI_simple_fs_guid:
 global efi_main ; global hace visible al Linker
 
 efi_main: 
-    efi_main:
     push rbx     ; corrige alineación (RSP%16 pasa de 8 a 0) y reserva rbx
     mov rbx, rdx ; RBX = puntero a EFI_SYSTEM_TABLE (persiste entre calls)
     mov rdi, rdx ; guardar puntero a SysTable en RDI
@@ -234,8 +233,8 @@ root: dq 0 ; root pointer
 
 filename: dw 'm','a','i','n','.','b','i','n',0
 main_file: dq 0 ; main pointer
-main_size: dq 4096 ; size maxima de main
-main_buffer: times 4096 db 0 ; puntero a la dirección 0 del main
+main_size: dq 8192 ; size maxima de main
+main_buffer: times 8192 db 0 ; puntero a la dirección 0 del main
 
 runtime_info: dq 0 ; Puntero a pasar al main.asm / kernel
 conout_info: dq 0 ; Puntero a pasar al main.asm / kernel
