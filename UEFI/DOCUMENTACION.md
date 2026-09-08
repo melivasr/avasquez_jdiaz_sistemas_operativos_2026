@@ -56,7 +56,6 @@ sudo cp build/main.bin /mnt/usb/main.bin
 
 # Confirmar
 ls -lh /mnt/usb/main.bin
--rwxr-xr-x 1 root root 4,3K sep  7 18:30 /mnt/usb/main.bin
 
 # Confirmacion final de archivos
 ls -l /mnt/usb
