@@ -35,4 +35,31 @@ Es el resultado de compilar el ensamblador `boot.asm` a un `boot.o` usando `NASM
 - `RCX = ImageHandler`
 - `RDX = EFI_SYSTEM_TABLE`
 
+## Preparar la USB en Linux
+
+```bash
+# Para montar una USB con nombre sda1
+sudo mount /dev/sda1 /mnt/usb
+
+# Verificar, deberia salir /mnt/usb
+lsblk -o NAME,SIZE,MODEL,TRAN,MOUNTPOINTS /dev/sda                   
+
+# Copiar BOOTX64.EFI 
+# - Cambiar la ruta del .EFI segun se necesite
+sudo cp /home/jafi21/Documentos/Repositorios/Operativos/tarea1/avasquez_jdiaz_sistemas_operativos_2026/UEFI/JAFIOS/build/EFI/BOOT/BOOTX64.EFI /mnt/usb/EFI/BOOT/
+
+# Verificar la copia
+ls -lh /mnt/usb/EFI/BOOT/BOOTX64.EFI
+
+# Sincronizar la copia de los datos con el USB
+sudo sync
+
+# Desmontar la USB (retiro seguro)
+sudo umount /mnt/usb
+
+
+
+```
+
+
 
