@@ -183,7 +183,31 @@ modo_cron:
     lea rcx, [rel cron_msg]
     call print
 ;
+
 modo_cron_loop:
+
+    ; WAIT FOR EVENT -> Key o Timer
+    mov rax, [rel bootServices_addr]
+    mov rax, [rax + EFI_WAIT_FOR_EVENT_off]
+
+    mov rcx, 2
+    lea rdx, [rel efi_events]
+    lea r8, [rel efi_events_index]
+
+    sub rsp, 32
+    call rax
+    add rsp, 32
+
+    ; ¿Qué evento ocurrió?
+    cmp qword [rel efi_events_index], 0
+    je cron_key_event
+
+    ; Si llegó aquí, fue el Timer
+    jmp cron_timer_event
+
+
+cron_key_event:
+
     call read_key
 
     cmp ax, 's'
@@ -202,6 +226,12 @@ modo_cron_loop:
     je exit
 
     jmp modo_cron_loop
+
+
+cron_timer_event:
+
+    jmp modo_cron_loop
+
 ;
 start_cron:
     mov qword [rel elapsed_seconds], 0 ; limpiarlo
