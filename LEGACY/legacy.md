@@ -71,12 +71,7 @@ Desde la carpeta del proyecto se pueden usar los siguientes comandos:
 
 ```bash
 cd ~/Documents/sistemasOperativos/tarea1/avasquez_jdiaz_sistemas_operativos_2026/LEGACY
-make
-make run
-make clear
 ```
-
-Descripción rápida:
 
 - `make` compila el bootloader y el kernel, y genera la imagen `build/main.img`.
 - `make run` genera la imagen y la ejecuta con QEMU.
