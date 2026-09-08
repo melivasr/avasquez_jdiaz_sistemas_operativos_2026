@@ -1,6 +1,6 @@
 # Legacy 
 
-Este documento describe la ejecución, las interrupciones BIOS utilizadas y el flujo de cada modo del sistema operativo en 16 bits.
+Este documento describe las interrupciones BIOS utilizadas y el flujo de ejecución.
 
 ## 1. Descripción general
 
@@ -20,7 +20,52 @@ Es necesario tener instalados los siguientes programas:
 
 Estos deben estar disponibles en la terminal del sistema antes de ejecutar el proyecto.
 
-## 1.2 Uso del Makefile
+## 1.2 Cómo arranca una computadora 
+
+Cuando la computadora se enciende, lo primero que ejecuta es la BIOS (Basic Input Output System). La BIOS inicializa el hardware básico y busca un dispositivo arrancable. En un arranque tipo legacy, la BIOS carga el primer sector del disco en la dirección de memoria 0x7C00.
+
+Ese primer sector tiene exactamente 512 bytes. La BIOS revisa los últimos dos bytes de ese bloque buscando la firma 0xAA55. Si la encuentra, asume que ese sector es un bootloader válido y comienza a ejecutar el código desde la dirección 0x7C00.
+
+Por eso, todo bootloader debe terminar con esa firma en la posición correcta. Si la firma no está presente, el sistema no considera que el disco sea arrancable.
+
+### What is a Legacy BIOS?
+
+A BIOS es el sistema básico de entrada/salida y es la primera capa de software que corre cuando se prende una PC. En modo legacy, la BIOS es una implementación más antigua que carga un bootloader desde el disco antes de pasar el control al sistema operativo. 
+
+## 1.3 El bootloader: boot.asm
+
+El archivo `boot.asm` es el primer código que se ejecuta. Su objetivo es:
+
+1. ubicarse en la dirección 0x7C00,
+2. preparar el entorno mínimo del hardware,
+3. leer el disco,
+4. localizar el archivo del kernel,
+5. cargarlo en memoria,
+6. transferir el control al kernel.
+
+Algunas instrucciones importantes son:
+
+- `org 0x7C00`: indica al ensamblador que todo el código debe considerarse cargado en esa dirección de memoria, porque la BIOS lo va a ubicar ahí.
+- `bits 16`: el procesador arranca en modo real de 16 bits por compatibilidad con hardware antiguo.
+- `main`: es el punto de entrada del bootloader.
+- `hlt`: pausa la CPU hasta que ocurra una interrupción.
+- `jmp halt`: crea un bucle infinito de seguridad para evitar que el código siga ejecutándose fuera de control si se interrumpe.
+- `times 510-($-$$) db 0`: rellena con ceros hasta completar 510 bytes del sector.
+- `dw 0xAA55`: escribe la firma de arranque en los últimos dos bytes del sector.
+
+## 1.4 El kernel principal: main.asm
+
+Una vez que el bootloader ha cargado el kernel en memoria, el control pasa a `main.asm`. El kernel se encarga de la lógica del sistema operativo, como la interfaz del usuario, la gestión del reloj, el cronómetro y la alarma.
+
+El flujo es:
+
+1. la BIOS carga el bootloader,
+2. el bootloader busca el kernel,
+3. el kernel se carga en memoria,
+4. el bootloader salta a la dirección del kernel,
+5. el sistema operativo comienza a correr.
+
+## 1.5 Uso del Makefile
 
 Desde la carpeta del proyecto se pueden usar los siguientes comandos:
 
@@ -90,4 +135,3 @@ Este flujo permite:
 - detectar cuándo llega la hora programada
 - mostrar la alarma visualmente
 - mantener una lógica de cancelación con `X`
-
