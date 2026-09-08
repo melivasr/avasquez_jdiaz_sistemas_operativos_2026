@@ -51,13 +51,18 @@ sudo cp /home/jafi21/Documentos/Repositorios/Operativos/tarea1/avasquez_jdiaz_si
 # Verificar la copia
 ls -lh /mnt/usb/EFI/BOOT/BOOTX64.EFI
 
+# Copiar main.bin al USB
+sudo cp build/main.bin /mnt/usb/main.bin
+
+# Confirmar
+ls -lh /mnt/usb/main.bin
+-rwxr-xr-x 1 root root 4,3K sep  7 18:30 /mnt/usb/main.bin
+
 # Sincronizar la copia de los datos con el USB
 sudo sync
 
 # Desmontar la USB (retiro seguro)
 sudo umount /mnt/usb
-
-
 
 ```
 
