@@ -126,9 +126,10 @@ modo_reloj:
 ;
 modo_reloj_loop:
 
-    ; WAIT FOR EVENT -> Esperar Evento Key o Timer
+    ; WAIT FOR EVENT -> Key o Timer
     mov rax, [rel bootServices_addr]
     mov rax, [rax + EFI_WAIT_FOR_EVENT_off]
+
     mov rcx, 2
     lea rdx, [rel efi_events]
     lea r8, [rel efi_events_index]
@@ -137,18 +138,36 @@ modo_reloj_loop:
     call rax
     add rsp, 32
 
-    ; Volver al menú
-    call read_key ; devuelve ascii en ax
-    cmp ax, 'v' 
+    ; ¿Qué evento ocurrió?
+    cmp qword [rel efi_events_index], 0
+    je reloj_key_event
+
+    ; Si llegó aquí, fue el Timer
+    jmp reloj_timer_event
+
+
+reloj_key_event:
+
+    call read_key
+
+    cmp ax, 'v'
     je menu
+
     cmp ax, 'w'
     je modo_cron
+
     cmp ax, 'e'
     je exit
 
-    ; Revisar el tiempo y comparar si cambia
+    jmp modo_reloj_loop
+
+
+reloj_timer_event:
+
+    ; Aquí NO hacemos read_key
+
     call get_time
-    cmp ah, [seg_actual]
+    cmp ah, [rel seg_actual]
     jne modo_reloj
 
     jmp modo_reloj_loop
