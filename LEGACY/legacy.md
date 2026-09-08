@@ -30,7 +30,7 @@ Por eso, todo bootloader debe terminar con esa firma en la posición correcta. S
 
 ### What is a Legacy BIOS?
 
-A BIOS es el sistema básico de entrada/salida y es la primera capa de software que corre cuando se prende una PC. En modo legacy, la BIOS es una implementación más antigua que carga un bootloader desde el disco antes de pasar el control al sistema operativo. 
+ En legacy la BIOS es una implementación más antigua que carga un bootloader desde el disco antes de pasar el control al sistema operativo. 
 
 ## 1.3 El bootloader: boot.asm
 
