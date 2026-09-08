@@ -1,6 +1,9 @@
 ORG 0x0 ; Define el origen del código en la dirección 0x0000
 BITS 16 ; Modo de 16 bits
 
+; -----------------------------------------------------------------------------
+; Entrada del kernel
+; -----------------------------------------------------------------------------
 ; Inicialización del kernel
 main:
     MOV AX, CS ; Guarda el segmento de código actual en AX
@@ -35,7 +38,9 @@ halt:
     HLT
     JMP halt
 
-
+; -----------------------------------------------------------------------------
+; Salida de consola
+; -----------------------------------------------------------------------------
 ; Imprime una cadena terminada en 0
 print: 
     PUSH SI
@@ -46,6 +51,8 @@ print_loop:
     LODSB ; Carga el siguiente carácter en AL y avanza SI
     OR AL, AL ; Comprueba si el carácter es el terminador nulo
     JZ print_done ; Si AL == 0, termina la cadena
+    ; INT 10h / AH=0Eh: imprime un carácter en la consola de texto.
+    ; Se usa para mostrar cada byte de la cadena en la pantalla del BIOS.
     MOV AH, 0x0E ; Servicio BIOS para imprimir carácter en pantalla
     MOV BH, 0x00 
     INT 0x10  ; Invoca al BIOS para imprimir el carácter en AL
@@ -59,11 +66,16 @@ print_done:
     RET 
 
 
+; -----------------------------------------------------------------------------
+; Salida de caracteres
+; -----------------------------------------------------------------------------
 ; Función para imprimir un solo carácter usando BIOS
 ; Entrada: AL = carácter a imprimir
 putchar:
     PUSH AX
     PUSH BX
+    ; INT 10h / AH=0Eh: escribe un solo carácter en modo texto.
+    ; Se usa para imprimir dígitos, signos y mensajes cortos sin recorrer cadenas.
     MOV AH, 0x0E
     MOV BH, 0x00
     INT 0x10
@@ -71,13 +83,17 @@ putchar:
     POP AX
     RET
 
-
+; -----------------------------------------------------------------------------
+; Utilidades de pantalla
+; -----------------------------------------------------------------------------
 ; Mueve el cursor a la posición (fila, columna)
 ; Fila: DH, Columna: DL
 ; En este caso se usa la línea 0, columna 0
 set_cursor:
     PUSH AX
     PUSH BX
+    ; INT 10h / AH=02h: coloca el cursor en una fila y columna dadas.
+    ; Se usa para escribir mensajes en posiciones exactas de la pantalla.
     MOV AH, 0x02 ; Función BIOS para posicionar el cursor
     MOV BH, 0x00 ; Página de video 0
     ; DH = fila, DL = columna, se pasan por registros antes de llamar
@@ -141,6 +157,9 @@ show_row:
     CALL print
     RET
 
+; -----------------------------------------------------------------------------
+; Visualización numérica
+; -----------------------------------------------------------------------------
 ; Convierte un byte BCD a ASCII y lo imprime
 print_byte_ascii:
     PUSH AX
@@ -169,6 +188,8 @@ print_byte_ascii:
 ; Lee una tecla y la devuelve en AL usando la interrupción BIOS
 ; INT 16h / AH = 00h
 read_key:
+    ; INT 16h / AH=00h: lee una tecla del teclado y la devuelve en AL.
+    ; Es la interrupción principal para capturar entrada del usuario.
     MOV AH, 00h ; Obtiene una tecla del buffer del teclado
     INT 16h ; AL = carácter ASCII, AH = código de scan
     RET
@@ -183,7 +204,9 @@ upper_case:
 
 upper_done:
     RET
-
+; -----------------------------------------------------------------------------
+; Interfaz de usuario
+; -----------------------------------------------------------------------------
 ; Muestra el menú y espera la opción elegida
 menu_select_mode:
     MOV BYTE [current_mode], 0
@@ -197,10 +220,14 @@ menu_wait_key:
     CALL check_alarm_state
     CALL chrono_update
 
+    ; INT 16h / AH=01h: consulta si hay una tecla en el buffer sin bloquear.
+    ; Si no hay entrada, el programa sigue ejecutando la lógica del menú.
     MOV AH, 01h ; Consulta si hay una tecla sin bloquear la cuenta del cronómetro.
     INT 16h
     JZ menu_wait_key
 
+    ; INT 16h / AH=00h: lee la tecla presionada y la devuelve en AL.
+    ; Permite procesar la opción elegida por el usuario.
     MOV AH, 00h
     INT 16h
     CALL upper_case
@@ -239,7 +266,9 @@ switch_clock_chrono:
     CMP BYTE [current_mode], 2
     JE mode_chronometer
     JMP mode_clock
-
+; -----------------------------------------------------------------------------
+; Modo alarma y flujo
+; -----------------------------------------------------------------------------
 ; Modo alarma
 ; Pide la hora HHMMSS, la arma en el RTC y deja la alarma activa 
 mode_alarm:
@@ -264,6 +293,8 @@ mode_alarm:
     MOV CH, [alarm_hour] ; CH = hora programada
     MOV CL, [alarm_minute] ; CL = minuto programado
     MOV DH, [alarm_second] ; DH = segundo programado
+    ; INT 1Ah / AH=06h: configura la alarma del RTC con HH/MM/SS.
+    ; Cuando el reloj llega a ese instante, el hardware dispara la interrupción INT 4Ah.
     MOV AH, 06h ; AH=06h => programar alarma del RTC
     INT 1Ah ; BIOS RTC: configura alarma con CH/CL/DH
     JC alarm_error ; si falla, vuelve al menú con error
@@ -308,6 +339,8 @@ check_alarm_state:
     RET
 
 check_alarm_time:
+    ; INT 1Ah / AH=02h: obtiene la hora actual del RTC.
+    ; Esta comparación permite decidir si la alarma ya debe activarse.
     MOV AH, 02h ; AH=02h => leer hora actual del RTC
     INT 1Ah ; CH=horas, CL=minutos, DH=segundos
 
@@ -441,6 +474,7 @@ cancel_alarm:
     CALL clear_alarm_line ; Borra el aviso visible de alarma
     MOV BYTE [alarm_active], 0 ; Desactiva el flag global para dejarla inactiva
     MOV BYTE [alarm_triggered], 0 ; Limpia el disparo previo para la próxima alarma
+    ; INT 1Ah / AH=07h: desactiva la alarma del RTC y deja libre el hardware.
     MOV AH, 07h ; AH=07h => desactivar alarma del RTC
     INT 1Ah ; BIOS RTC: desarma la alarma programada
     CALL restore_alarm_handler ; Vuelve al handler original del sistema
@@ -470,6 +504,9 @@ alarm_error:
     CALL show_row
     JMP menu_select_mode
 
+; -----------------------------------------------------------------------------
+; Interrupción de alarma RTC
+; -----------------------------------------------------------------------------
 ; Instala el handler de la alarma del RTC en INT 4Ah.
 ; El vector de interrupción 4Ah está en la IVT en offsets 0128h/012Ah.
 ; Guardamos el valor anterior para poder restaurarlo al salir del modo alarma.
@@ -503,11 +540,15 @@ restore_alarm_handler:
     PUSH AX
 
     XOR AX, AX
-    MOV ES, AX ; ES = 0000h => apuntamos a la IVT(tabla de vectores de interrupcion)
-    MOV AX, [old_offset] ; recupera el offset original de INT 4Ah
-    MOV [ES:0128h], AX
-    MOV AX, [old_segment] ; recupera el segmento original de INT 4Ah
-    MOV [ES:012Ah], AX
+    MOV ES, AX ; ES = 0000h => apuntamos a la IVT (tabla de vectores de interrupcion)
+
+    ; Recupera el vector original que había en INT 4Ah para dejar el sistema en
+    ; el estado anterior a nuestra instalación del handler de alarma.
+    MOV AX, [old_offset] ; carga el offset original de INT 4Ah desde la variable guardada
+    MOV [ES:0128h], AX ; escribe ese offset en la entrada de la IVT para restaurar el handler
+
+    MOV AX, [old_segment] ; carga el segmento original de INT 4Ah desde la variable guardada
+    MOV [ES:012Ah], AX ; escribe ese segmento en la misma entrada para restaurar el vector completo
 
     POP AX
     POP ES
@@ -544,7 +585,9 @@ alarm_handler_done:
     POP DX
     POP AX
     IRET
-    
+; -----------------------------------------------------------------------------
+; Reloj y cronómetro
+; -----------------------------------------------------------------------------
 ; Modo reloj
 mode_clock:
     MOV BYTE [current_mode], 2
@@ -685,6 +728,8 @@ reset_chrono_global:
 ; de 32 bits; CX es la parte alta y DX la parte baja.
 ; Este valor se usa para medir intervalos de tiempo en el cronómetro.
 get_bios_ticks:
+    ; INT 1Ah / AH=00h: devuelve el contador de ticks del sistema desde medianoche.
+    ; Se usa como base para medir tiempos del cronómetro y del parpadeo.
     MOV AH, 00h
     INT 1Ah
     RET
@@ -817,6 +862,9 @@ print_byte_decimal:
     POP AX
     RET
 
+; -----------------------------------------------------------------------------
+; Configuración de alarma
+; -----------------------------------------------------------------------------
 ; Lee HHMMSS y guarda la hora como BCD para compararla con INT 1Ah/AH=02h.
 ; El usuario ingresa seis dígitos; la rutina valida HH/MM/SS. 
 read_alarm_time:
@@ -831,65 +879,66 @@ read_alarm_time:
 ; Lee caracteres de teclado hasta completar 6 dígitos.
 ; Si no es un dígito entre 0 y 9, se descarta y se vuelve a pedir.
 alarm_read:
-    CALL read_key
-    CALL upper_case
+    CALL read_key  
+    CALL upper_case  
 
-    CMP AL, 'Q'
-    JE halt
+    CMP AL, 'Q'                 
+    JE halt                     
 
-    CMP AL, 'V'
-    JE alarm_config_exit_to_menu
-    CMP AL, 'X'
-    JE alarm_cancel_only
-    CMP AL, 'R'
-    JE alarm_read_reset
-    CMP AL, '0'
-    JB alarm_read
-    CMP AL, '9'
-    JA alarm_read
-    CMP BL, 6
-    JNB alarm_read
+    CMP AL, 'V'                 
+    JE alarm_config_exit_to_menu ;
+    CMP AL, 'X'                 
+    JE alarm_cancel_only        
+    CMP AL, 'R'                 
+    JE alarm_read_reset          
+    CMP AL, '0'  ; Verifica que el carácter esté en el rango numérico.
+    JB alarm_read ; Si es menor que '0', ignora y vuelve a leer.
+    CMP AL, '9' ; Verifica que el carácter sea un dígito.
+    JA alarm_read ; Si es mayor que '9', ignora y vuelve a leer.
+    CMP BL, 6  ; Comprueba si ya se ingresaron 6 dígitos.
+    JNB alarm_read  ; Si ya hay 6, ignora y vuelve a leer.
 
-    CALL putchar
-    SUB AL, '0'
-    MOV [alarm_digits + BX], AL
-    INC BL
-    CMP BL, 6
-    JB alarm_read
+    CALL putchar ; Muestra el dígito ingresado en pantalla.
+    SUB AL, '0'  ; Convierte el carácter ASCII a su valor numérico.
+    MOV [alarm_digits + BX], AL ; Guarda el dígito en la posición actual del arreglo.
+    INC BL     ; Avanza al siguiente índice del arreglo.
+    CMP BL, 6  ; Comprueba si ya se completaron los 6 dígitos.
+    JB alarm_read  ; Si faltan dígitos, sigue pidiendo más.
 
     ; HH debe estar entre 00 y 23; MM y SS entre 00 y 59.
     ; Se valida primero la hora y luego los minutos/segundos.
-    CMP byte [alarm_digits], 2
-    JA alarm_invalid
-    JNE alarm_check_minutes
-    CMP byte [alarm_digits + 1], 3
-    JA alarm_invalid
+    CMP byte [alarm_digits], 2  ; Comprueba la primera cifra de la hora (horas decenas).
+    JA alarm_invalid   ; Si es mayor que 2, la hora es inválida.
+    JNE alarm_check_minutes   ; Si la decena no es 2, salta a validar minutos.
+    CMP byte [alarm_digits + 1], 3 ; Comprueba la segunda cifra de la hora (horas unidades).
+    JA alarm_invalid    ; Si es mayor que 3, la hora es inválida.
 
 alarm_check_minutes:
-    CMP byte [alarm_digits + 2], 5
-    JA alarm_invalid
-    CMP byte [alarm_digits + 4], 5
-    JA alarm_invalid
+    CMP byte [alarm_digits + 2], 5 ; Comprueba la decena de minutos.
+    JA alarm_invalid     ; Si es mayor que 5, los minutos son inválidos.
+    CMP byte [alarm_digits + 4], 5 ; Comprueba la decena de segundos.
+    JA alarm_invalid  ; Si es mayor que 5, los segundos son inválidos.
 
     ; Arma el valor final en formato BCD: HH, MM y SS.
-    MOV AL, [alarm_digits]
-    SHL AL, 4
-    OR AL, [alarm_digits + 1]
-    MOV [alarm_hour], AL
-    MOV AL, [alarm_digits + 2]
-    SHL AL, 4
-    OR AL, [alarm_digits + 3]
-    MOV [alarm_minute], AL
-    MOV AL, [alarm_digits + 4]
-    SHL AL, 4
-    OR AL, [alarm_digits + 5]
-    MOV [alarm_second], AL
-    RET
+    MOV AL, [alarm_digits]  ; Carga la primera cifra (hora decenas).
+    SHL AL, 4  ; Desplaza al nibble alto del byte de horas.
+    OR AL, [alarm_digits + 1]  ; Combina con la cifra de las unidades de hora.
+    MOV [alarm_hour], AL ; Guarda la hora en BCD en alarm_hour.
+    MOV AL, [alarm_digits + 2]  ; Carga la primera cifra de los minutos.
+    SHL AL, 4 ; Desplaza al nibble alto del byte de minutos.
+    OR AL, [alarm_digits + 3] ; Combina con la cifra de las unidades de minutos.
+    MOV [alarm_minute], AL ; Guarda los minutos en BCD en alarm_minute.
+    MOV AL, [alarm_digits + 4]  ; Carga la primera cifra de los segundos.
+    SHL AL, 4 ; Desplaza al nibble alto del byte de segundos.
+    OR AL, [alarm_digits + 5] ; Combina con la cifra de las unidades de segundos.
+    MOV [alarm_second], AL ; Guarda los segundos en BCD en alarm_second.
+    RET  ; Retorna con la hora de alarma
 
 alarm_invalid:
     MOV DH, 4
     MOV SI, alarm_invalid_msg
     CALL show_row
+    ; Vuelve a solicitar la hora de la alarma para reingresar un valor válido.
     JMP read_alarm_time
 
 alarm_config_exit_to_menu:
@@ -903,6 +952,8 @@ print_time_loop:
 
 print_time_update:
     CALL chrono_update
+    ; INT 1Ah / AH=02h: lee la hora actual del RTC en formato BCD.
+    ; Aquí se usa para actualizar la hora visible en la pantalla.
     MOV AH, 02h
     INT 1Ah ; CH=horas, CL=minutos, DH=segundos (BCD)
     MOV BH, DH ; Guarda los segundos en BH antes de cambiar DH por la fila
@@ -957,43 +1008,53 @@ time_check_s:
     JE switch_clock_chrono
     JMP print_time_update ; Si no es V ni X ni R ni S, sigue el reloj
 
-;Mensajes para mostrar en pantalla
+; -----------------------------------------------------------------------------
+; Mensajes y estado
+; -----------------------------------------------------------------------------
+; Mensajes principales del sistema
 os_boot_msg: DB "meliOS is working...", 0x0D, 0x0A, 0 
-start_msg: DB 'Para entrar en modo interactivo presione la tecla "I", para cerrar presione "Q".', 0x0D, 0x0A, 0
+start_msg: DB 'Bienvenido al sistema, para entrar en modo interactivo presione la tecla "I", para cerrar presione "Q".', 0x0D, 0x0A, 0
 menu_msg: DB 0x0D, 0x0A, "Seleccione modo: A=Alarma  H=Hora Actual  C=Cronometro R=Reiniciar cronometro Q=Cerrar", 0x0D, 0x0A, 0
 invalid_msg: DB 0x0D, 0x0A, "Opcion invalida. Presione A=Alarma, H=Hora Actual, C=Cronometro o V.", 0x0D, 0x0A, 0
+
+; Mensajes del modo alarma
 alarm_msg: DB "Modo alarma: presione X para cancelar o V para volver al menu", 0
 alarm_hora_msg: DB "Hora de alarma (HHMMSS): ", 0
 alarm_invalid_msg: DB "Hora invalida. Use un valor entre 000000 y 235959.", 0
 alarm_set_msg: DB "Alarma configurada. Presione V para volver al menu.", 0
 alarm_ring_msg: DB "*** ALARMA ACTIVADA, presione X para cancelar ***", 0
 
+; Mensajes del reloj y cronómetro
 chrono_msg: DB "Modo cronometro", 0
 chrono_controls_msg: DB "I=Iniciar/Reanudar P=Pausar R=Reiniciar S=Switch V=Volver" , 0
 chrono_time_msg: DB "Tiempo: ", 0
-hora_msg: DB "Hora actual: ", 0 ; Texto para la hora
+hora_msg: DB "Modo reloj. Hora actual: ", 0 ; Texto para la hora
 clock_msg: DB "Presione S para cambiar entre reloj y cronometro. R para reiniciar el cronometro y V para volver al menu", 0 ; Texto para la hora
 
-current_mode: DB 0
-chrono_initialized: DB 0
-alarm_triggered: DB 0
-alarm_active: DB 0
-old_offset: DW 0
-old_segment: DW 0
-alarm_hour: DB 0
-alarm_minute: DB 0
-alarm_second: DB 0
-alarm_digits: TIMES 6 DB 0
-alarm_color_state: DB 0FFh 
+; Estado global del kernel
+current_mode: DB 0 ; Modo activo actual: reloj, alarma o cronómetro
+chrono_initialized: DB 0 ; Indica si el cronómetro ya fue inicializado
+alarm_triggered: DB 0 ; Marca si la alarma ya disparó
+alarm_active: DB 0 ; Indica si la alarma está armada y activa
+old_offset: DW 0 ; Offset del handler original de INT 4Ah
+old_segment: DW 0 ; Segmento del handler original de INT 4Ah
+
+; Configuración de la alarma
+alarm_hour: DB 0 ; Hora programada para la alarma
+alarm_minute: DB 0 ; Minuto programado para la alarma
+alarm_second: DB 0 ; Segundo programado para la alarma
+alarm_digits: TIMES 6 DB 0 ; Digitos capturados HHMMSS
+alarm_color_state: DB 0FFh ; Estado del parpadeo visual de la alarma
 video_mem_base: DW 0xB800 ; Segmento de memoria de video en modo texto VGA
 screen_cells: DW 80 * 25 ; Total de celdas de texto del modo VGA (80x25)
 
-chrono_running: DB 0
-chrono_start_low: DW 0
-chrono_start_high: DW 0
-chrono_elapsed_low: DW 0
-chrono_elapsed_high: DW 0
-chrono_last_seconds: DW 0
-chrono_hours: DB 0
-chrono_minutes: DB 0
-chrono_seconds: DB 0
+; Estado del cronómetro
+chrono_running: DB 0 ; 1 si el cronómetro está corriendo
+chrono_start_low: DW 0 ; Parte baja del tick inicial del cronómetro
+chrono_start_high: DW 0 ; Parte alta del tick inicial del cronómetro
+chrono_elapsed_low: DW 0 ; Tiempo acumulado bajo del cronómetro
+chrono_elapsed_high: DW 0 ; Tiempo acumulado alto del cronómetro
+chrono_last_seconds: DW 0 ; Último segundo visualizado en pantalla
+chrono_hours: DB 0 ; Horas mostradas del cronómetro
+chrono_minutes: DB 0 ; Minutos mostrados del cronómetro
+chrono_seconds: DB 0 ; Segundos mostrados del cronómetro
