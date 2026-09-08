@@ -135,3 +135,15 @@ Este flujo permite:
 - detectar cuándo llega la hora programada
 - mostrar la alarma visualmente
 - mantener una lógica de cancelación con `X`
+
+## 3. Modos disponibles
+
+El sistema cuenta con los siguientes modos principales:
+
+- `Reloj`: muestra la hora actual y se actualiza por segundo.
+- `Cronómetro`: mide el tiempo transcurrido y permite iniciar, pausar y reiniciar.
+- `Alarma`: permite configurar una hora específica para activar la alerta del RTC.
+- `Menú principal`: permite navegar entre los modos y volver al menú desde cualquiera de ellos.
+- `Salir`: termina la ejecución del sistema.
+
+Estos modos se seleccionan desde el menú interactivo y permiten cambiar entre funciones sin reiniciar el sistema.
